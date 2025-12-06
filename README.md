@@ -34,7 +34,7 @@ Aplikacja służy do optymalizacji i przygotowywania obrazów zgodnie z wymagani
 
 ### Krok 1: Klonowanie repozytorium
 ```bash
-git clone https://github.com/TWOJA_NAZWA_UZYTKOWNIKA/Asystent-PIM-Media-Expert-Linux.git
+git clone https://github.com/LucasTerg/Asystent-PIM-Media-Expert-Linux.git
 cd Asystent-PIM-Media-Expert-Linux
 ```
 
