@@ -1,5 +1,7 @@
 # Asystent PIM Media Expert (Linux Port)
 
+![Wygląd Aplikacji](1.webp)
+
 Jest to port aplikacji "Asystent PIM Media Expert" pierwotnie napisanej w C# (.NET) na natywną aplikację Linux z nowoczesnym interfejsem graficznym.
 
 ## Funkcjonalność
