@@ -1,8 +1,8 @@
-# Asystent PIM Media Expert (Linux Port)
+# Asystent PIM Media Expert (Linux Reimplementation)
 
 ![Wygląd Aplikacji](1.webp)
 
-Jest to port aplikacji "Asystent PIM Media Expert" pierwotnie napisanej w C# (.NET) na natywną aplikację Linux z nowoczesnym interfejsem graficznym.
+Jest to otwartoźródłowa **reimplementacja** aplikacji "Asystent PIM Media Expert", napisana od podstaw w języku Python dla systemu Linux, oferująca nowoczesny interfejs graficzny.
 
 ## Funkcjonalność
 Aplikacja służy do optymalizacji i przygotowywania obrazów zgodnie z wymaganiami Media Expert. Główne funkcje obejmują:
