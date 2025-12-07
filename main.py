@@ -3,13 +3,14 @@ from tkinter import filedialog, messagebox, ttk, Menu
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageTk, UnidentifiedImageError
 import os
-import io
 import datetime
 import re
 import subprocess
 import platform
 import pillow_avif
 import pillow_heif
+import shutil
+import shlex # DO PARSOWANIA ŚCIEŻEK
 
 pillow_heif.register_heif_opener()
 
@@ -23,8 +24,8 @@ class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.0")
-        self.geometry("1350x900") # Trochę wyższe okno dla suwaka
+        self.title("Asystent PIM Media Expert v17.0")
+        self.geometry("1350x900")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -32,6 +33,7 @@ class AsystentApp(ctk.CTk):
         self.overwrite_var = ctk.BooleanVar(value=True)
         self.current_preview_path = None
         self.preview_image_ref = None 
+        self.bind("<Button-1>", self.hide_context_menu)
         self.setup_ui()
 
     def set_icon(self):
@@ -53,7 +55,7 @@ class AsystentApp(ctk.CTk):
     def setup_ui(self):
         self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=ME_BLACK)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(25, weight=1) # Więcej miejsca na dole
+        self.sidebar.grid_rowconfigure(25, weight=1)
 
         ctk.CTkLabel(self.sidebar, text="Asystent PIM", font=ctk.CTkFont(size=24, weight="bold"), text_color=ME_YELLOW).grid(row=0, column=0, padx=20, pady=(20, 10))
         ctk.CTkLabel(self.sidebar, text="MEDIA EXPERT", font=ctk.CTkFont(size=12, weight="bold"), text_color="white").grid(row=1, column=0, padx=20, pady=(0, 20))
@@ -64,20 +66,15 @@ class AsystentApp(ctk.CTk):
         ctk.CTkButton(self.sidebar, text="WYCZYŚĆ LISTĘ", command=self.clear_list, fg_color="#444444", text_color="white", hover_color="#666666", width=200, height=35).grid(row=3, column=0, padx=15, pady=5)
         ctk.CTkButton(self.sidebar, text="USUŃ ZAZNACZONY", command=self.remove_selected, fg_color="transparent", border_width=1, border_color="gray50", text_color="gray80", width=200).grid(row=4, column=0, padx=15, pady=5)
 
-        # KOLEJNOŚĆ
         ctk.CTkLabel(self.sidebar, text="KOLEJNOŚĆ", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=5, column=0, padx=20, pady=(15,5))
         move_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         move_frame.grid(row=6, column=0)
         ctk.CTkButton(move_frame, text="▲", command=self.move_up, width=95, height=30, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
         ctk.CTkButton(move_frame, text="▼", command=self.move_down, width=95, height=30, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
 
-        # EDYCJA I SUWAK
         ctk.CTkLabel(self.sidebar, text="USTAWIENIA JPG", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=7, column=0, padx=20, pady=(15,5))
-        
-        # Suwak Jakości
         self.lbl_quality = ctk.CTkLabel(self.sidebar, text="Jakość: 95", text_color="white")
         self.lbl_quality.grid(row=8, column=0, padx=20, pady=0)
-        
         self.slider_quality = ctk.CTkSlider(self.sidebar, from_=10, to=100, number_of_steps=90, command=self.update_quality_label, width=180, progress_color=ME_YELLOW, button_color="white", button_hover_color=ME_YELLOW)
         self.slider_quality.set(95)
         self.slider_quality.grid(row=9, column=0, padx=20, pady=5)
@@ -85,7 +82,6 @@ class AsystentApp(ctk.CTk):
         self.chk_overwrite = ctk.CTkCheckBox(self.sidebar, text="Nadpisz pliki", variable=self.overwrite_var, font=ctk.CTkFont(size=12), text_color="white", fg_color=ME_YELLOW, hover_color=ME_YELLOW_HOVER, checkmark_color="black")
         self.chk_overwrite.grid(row=10, column=0, padx=25, pady=10, sticky="w")
 
-        # OPERACJE
         ctk.CTkLabel(self.sidebar, text="OPERACJE", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=11, column=0, padx=20, pady=(10,5))
 
         ops = [
@@ -94,8 +90,8 @@ class AsystentApp(ctk.CTk):
             ("DODAJ RAMKĘ 5px", self.add_border_5px),
             ("KADRUJ", self.auto_crop),
             ("ZWIĘKSZ DO 500px", self.upscale_500),
-            ("DOPASUJ DO 3000px", self.downscale_3000),
-            ("KOMPRESUJ DO 3 MB", self.smart_compress_3mb) # Nowy przycisk
+            ("DOPASUJ DO 3000x3600", self.downscale_custom),
+            ("KOMPRESUJ DO 3 MB", self.smart_compress_3mb)
         ]
 
         r = 12
@@ -103,7 +99,6 @@ class AsystentApp(ctk.CTk):
             ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_me).grid(row=r, column=0, padx=15, pady=5)
             r += 1
 
-        # --- PANEL GŁÓWNY ---
         self.main_area = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
         self.main_area.grid_rowconfigure(2, weight=1)
@@ -153,6 +148,7 @@ class AsystentApp(ctk.CTk):
         self.context_menu = Menu(self.main_area, tearoff=0, bg="#2D2D2D", fg="white", activebackground=ME_YELLOW, activeforeground="black")
         self.context_menu.add_command(label="Otwórz plik", command=self.open_file_default)
         self.context_menu.add_command(label="Otwórz folder pliku", command=self.open_folder_context)
+        self.context_menu.add_command(label="Edytuj w GIMP", command=self.open_in_gimp)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Usuń z listy", command=self.remove_selected)
 
@@ -172,6 +168,10 @@ class AsystentApp(ctk.CTk):
 
     def update_quality_label(self, value):
         self.lbl_quality.configure(text=f"Jakość: {int(value)}")
+
+    def hide_context_menu(self, event):
+        try: self.context_menu.unpost()
+        except: pass
 
     def paste_from_clipboard(self):
         try:
@@ -251,6 +251,7 @@ class AsystentApp(ctk.CTk):
         self.status_label.configure(text=f"Zmieniono nazwy dla {renamed} plików.")
 
     def on_tree_click(self, event):
+        self.hide_context_menu(event)
         region = self.tree.identify_region(event.x, event.y)
         if region == "cell":
             column = self.tree.identify_column(event.x)
@@ -275,6 +276,17 @@ class AsystentApp(ctk.CTk):
     def open_folder_context(self):
         sel = self.tree.selection()
         if sel: self.open_file_location(self.tree.item(sel[0])['tags'][0])
+
+    def open_in_gimp(self):
+        sel = self.tree.selection()
+        if sel:
+            path = self.tree.item(sel[0])['tags'][0]
+            if not os.path.exists(path): return
+            try:
+                subprocess.Popen(['gimp', path])
+            except FileNotFoundError:
+                try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
+                except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP.")
 
     def open_path(self, path):
         if not os.path.exists(path): return
@@ -319,17 +331,45 @@ class AsystentApp(ctk.CTk):
             self.lbl_preview.configure(image="", text="Błąd wyświetlania")
 
     def add_images(self):
-        types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
-        files = filedialog.askopenfilenames(filetypes=types)
-        if files:
-            for path in files:
-                exists = False
-                for e in self.file_list:
-                    if e == path: exists = True
-                if not exists:
-                    self.file_list.append(path)
-                    self.insert_tree_item(path)
-            self.update_indexes()
+        if shutil.which("kdialog"): self.add_images_kdialog()
+        else:
+            types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
+            files = filedialog.askopenfilenames(filetypes=types)
+            if files: self.process_added_files(files)
+
+    def add_images_kdialog(self):
+        try:
+            cmd = [
+                "kdialog", "--getopenfilename", os.path.expanduser("~"), 
+                "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF",
+                "--multiple"
+            ]
+            output = subprocess.check_output(cmd).decode("utf-8").strip()
+            if not output: return
+
+            if '\n' in output:
+                files = output.split('\n')
+            else:
+                files = shlex.split(output)
+            
+            clean_files = [f.replace('file://', '').strip() for f in files if f.strip()]
+            self.process_added_files(clean_files)
+            
+        except Exception as e:
+            print(f"kdialog fail: {e}")
+            types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
+            files = filedialog.askopenfilenames(filetypes=types)
+            if files: self.process_added_files(files)
+
+    def process_added_files(self, files):
+        for path in files:
+            exists = False
+            for e in self.file_list:
+                if e == path: exists = True
+            if not exists:
+                self.file_list.append(path)
+                self.insert_tree_item(path)
+        self.update_indexes()
 
     def insert_tree_item(self, path):
         if not os.path.exists(path): return
@@ -369,8 +409,6 @@ class AsystentApp(ctk.CTk):
         overwrite = self.overwrite_var.get()
         self.status_label.configure(text=f"Przetwarzanie: {name}...")
         self.update_idletasks()
-
-        # Pobieramy jakość z suwaka dla operacji JPG
         quality_val = int(self.slider_quality.get())
 
         for item in selected:
@@ -380,7 +418,7 @@ class AsystentApp(ctk.CTk):
             try:
                 with Image.open(path) as img:
                     img.load()
-                    res = func(img) # Wywołanie funkcji transformującej
+                    res = func(img)
                     if res:
                         original_dir = os.path.dirname(path)
                         save_path = path 
@@ -394,21 +432,13 @@ class AsystentApp(ctk.CTk):
                                 os.rename(path, archived_original_path)
                                 n, e = os.path.splitext(path)
                                 suffix = name.lower().replace(' ','')
-                                # Przy "konwertuj do jpg", suffix nie jest potrzebny w nazwie jeśli zmieniamy rozszerzenie
-                                if name == "JPG":
+                                if name == "JPG" or name == "Kompresja3MB":
                                     save_path = f"{n}.jpg"
                                 else:
                                     save_path = f"{n}_{suffix}{e}"
                             except Exception as e:
-                                print(f"Archive err: {e}")
                                 continue
                         
-                        # FIX DLA JPG / ZAPIS
-                        if name == "JPG" or (overwrite and name == "Kompresja3MB"):
-                             # Jeśli kompresja, to nazwa może zostać, ale format musi być JPG
-                             pass
-
-                        # Logika zapisu
                         if name == "JPG":
                             if res.mode != 'RGB': res = res.convert('RGB')
                             root, _ = os.path.splitext(save_path)
@@ -416,23 +446,19 @@ class AsystentApp(ctk.CTk):
                             res.save(save_path, quality=quality_val, optimize=True, progressive=True)
                         
                         elif name == "Kompresja3MB":
-                            # Logika specjalna dla kompresji
                             if res.mode != 'RGB': res = res.convert('RGB')
                             root, _ = os.path.splitext(save_path)
                             save_path = root + ".jpg"
                             self.save_compressed_limit(res, save_path, 3 * 1024 * 1024)
                         
                         else:
-                            # Inne operacje (kadrowanie itp)
                             if save_path.lower().endswith(('.jpg', '.jpeg')):
                                 if res.mode != 'RGB': res = res.convert('RGB')
                                 res.save(save_path, quality=quality_val, optimize=True, progressive=True)
                             else:
                                 res.save(save_path)
 
-                        # Aktualizacja UI
                         if os.path.exists(save_path):
-                            # Jeśli przenieśliśmy oryginał, musimy zaktualizować listę żeby wskazywała na nowy plik
                             if not overwrite:
                                 self.file_list.remove(path)
                                 self.file_list.append(save_path)
@@ -441,56 +467,39 @@ class AsystentApp(ctk.CTk):
                             dim = f"{res.width}x{res.height} px"
                             vals = self.tree.item(item)['values']
                             self.tree.item(item, values=(vals[0], os.path.basename(save_path), self.format_bytes(size), dim, "📂"), tags=[save_path])
-                            
-                            if self.current_preview_path == path:
-                                self.show_preview(save_path)
+                            if self.current_preview_path == path: self.show_preview(save_path)
 
             except Exception as e:
-                print(f"Err {name}: {e}")
                 self.status_label.configure(text=f"Błąd: {os.path.basename(path)}")
 
         self.update_indexes()
         self.status_label.configure(text=f"Zakończono: {name}")
 
     def save_compressed_limit(self, img, path, limit_bytes):
-        # Algorytm kompresji do rozmiaru
         quality = 95
         min_quality = 65
-        
-        # Najpierw spróbuj samą jakością
         while quality >= min_quality:
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=quality, optimize=True, progressive=True)
-            size = buffer.getbuffer().nbytes
-            if size <= limit_bytes:
-                with open(path, "wb") as f:
-                    f.write(buffer.getbuffer())
+            if buffer.getbuffer().nbytes <= limit_bytes:
+                with open(path, "wb") as f: f.write(buffer.getbuffer())
                 return
             quality -= 5
-        
-        # Jeśli nadal za duży, zmniejszamy rozdzielczość
         scale = 0.9
         while True:
             new_w = int(img.width * scale)
             new_h = int(img.height * scale)
-            if new_w < 100 or new_h < 100: break # Bezpiecznik
-            
+            if new_w < 100 or new_h < 100: break
             resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             buffer = io.BytesIO()
             resized.save(buffer, format="JPEG", quality=min_quality, optimize=True, progressive=True)
-            
             if buffer.getbuffer().nbytes <= limit_bytes:
-                with open(path, "wb") as f:
-                    f.write(buffer.getbuffer())
+                with open(path, "wb") as f: f.write(buffer.getbuffer())
                 return
-            scale *= 0.9 # Zmniejszaj o kolejne 10%
+            scale *= 0.9
 
     def convert_to_jpg(self): self.process_images("JPG", lambda i: i.convert("RGB"))
-    
-    def smart_compress_3mb(self):
-        # Funkcja tożsamościowa, bo cała logika jest w process_images -> save_compressed_limit
-        self.process_images("Kompresja3MB", lambda i: i)
-
+    def smart_compress_3mb(self): self.process_images("Kompresja3MB", lambda i: i)
     def add_white_bg(self):
         def f(i):
             if i.mode != 'RGBA': i = i.convert('RGBA')
@@ -500,7 +509,6 @@ class AsystentApp(ctk.CTk):
             bg.paste(i, ((t-w)//2, (t-h)//2), i)
             return bg
         self.process_images("BialeTlo", f)
-
     def add_border_5px(self):
         def f(i):
             if i.mode != 'RGBA': i = i.convert('RGBA')
@@ -511,7 +519,6 @@ class AsystentApp(ctk.CTk):
             bg.paste(i, (5, 5), mask)
             return bg
         self.process_images("Ramka5px", f)
-
     def auto_crop(self):
         def f(i):
             if i.mode != 'RGB': i = i.convert('RGB')
@@ -519,7 +526,6 @@ class AsystentApp(ctk.CTk):
             bbox = bw.getbbox()
             return i.crop(bbox) if bbox else i
         self.process_images("Kadrowanie", f)
-
     def upscale_500(self):
         def f(i):
             w, h = i.size
@@ -528,12 +534,11 @@ class AsystentApp(ctk.CTk):
                 return i.resize((int(w*r), int(h*r)), Image.Resampling.LANCZOS)
             return i
         self.process_images("Upscale", f)
-
-    def downscale_3000(self):
+    def downscale_custom(self):
         def f(i):
             w, h = i.size
-            if w > 3000 or h > 3000:
-                i.thumbnail((3000, 3000), Image.Resampling.LANCZOS)
+            if w > 3000 or h > 3600:
+                i.thumbnail((3000, 3600), Image.Resampling.LANCZOS)
                 return i
             return i
         self.process_images("Downscale", f)

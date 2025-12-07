@@ -1,6 +1,6 @@
 # Asystent PIM Media Expert (Linux Reimplementation)
 
-![Wygląd Aplikacji](1.webp)
+![Wygląd Aplikacji](1.png)
 
 Jest to otwartoźródłowa **reimplementacja** aplikacji "Asystent PIM Media Expert", napisana od podstaw w języku Python dla systemu Linux, oferująca nowoczesny interfejs graficzny.
 
