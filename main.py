@@ -11,6 +11,10 @@ import pillow_avif
 import pillow_heif
 import shutil
 import shlex # DO PARSOWANIA ŚCIEŻEK
+import io
+
+# Wyłącz limit pikseli dla dużych obrazów z AI
+Image.MAX_IMAGE_PIXELS = None
 
 pillow_heif.register_heif_opener()
 
@@ -24,7 +28,7 @@ class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v17.0")
+        self.title("Asystent PIM Media Expert v1.0.0")
         self.geometry("1350x900")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
@@ -51,6 +55,33 @@ class AsystentApp(ctk.CTk):
         with BytesIO() as output:
             im.save(output, format="PNG")
             return output.getvalue()
+
+    def check_ai_tools(self):
+        # 1. Sprawdź czy binary istnieje w systemie
+        self.ai_tool_path = shutil.which("realesrgan-ncnn-vulkan")
+        if self.ai_tool_path: return True
+        
+        # 2. Sprawdź obok pliku skryptu (dla repozytorium/struktury folderów)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script_bin = os.path.join(script_dir, "realesrgan-ncnn-vulkan")
+        if os.path.exists(script_bin) and os.access(script_bin, os.X_OK):
+            self.ai_tool_path = script_bin
+            return True
+
+        # 3. Sprawdź w bieżącym katalogu roboczym (dla kompatybilności wstecznej)
+        local_bin = os.path.abspath("realesrgan-ncnn-vulkan")
+        if os.path.exists(local_bin) and os.access(local_bin, os.X_OK):
+            self.ai_tool_path = local_bin
+            return True
+
+        # 4. Sprawdź w katalogu tymczasowym PyInstallera (dla OneFile)
+        if hasattr(sys, '_MEIPASS'):
+            temp_bin = os.path.join(sys._MEIPASS, "realesrgan-ncnn-vulkan")
+            if os.path.exists(temp_bin) and os.access(temp_bin, os.X_OK):
+                self.ai_tool_path = temp_bin
+                return True
+                
+        return False
 
     def setup_ui(self):
         self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=ME_BLACK)
@@ -94,24 +125,56 @@ class AsystentApp(ctk.CTk):
             ("KOMPRESUJ DO 3 MB", self.smart_compress_3mb)
         ]
 
+        # Sprawdź AI
+        has_ai = self.check_ai_tools()
+        if has_ai:
+            ops.append(("AI SMART UPSCALE", self.ai_upscale_x4))
+
         r = 12
         for text, cmd in ops:
-            ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_me).grid(row=r, column=0, padx=15, pady=5)
+            if text == "AI SMART UPSCALE":
+                 # Dodatkowy wiersz na ustawienia AI
+                 ai_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+                 ai_frame.grid(row=r, column=0, pady=(5,0))
+                 ctk.CTkLabel(ai_frame, text="Max Px:", text_color="gray", font=ctk.CTkFont(size=11)).pack(side="left", padx=2)
+                 self.entry_ai_target = ctk.CTkEntry(ai_frame, width=60, height=25, border_color="#6A0DAD", justify="center")
+                 self.entry_ai_target.insert(0, "3000")
+                 self.entry_ai_target.pack(side="left", padx=2)
+                 
+                 r += 1
+                 
+                 # Kopia stylu dla przycisku AI
+                 btn_ai = btn_me.copy()
+                 btn_ai.update({"fg_color": "#6A0DAD", "hover_color": "#800080"})
+                 ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_ai).grid(row=r, column=0, padx=15, pady=5)
+            else:
+                 ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_me).grid(row=r, column=0, padx=15, pady=5)
             r += 1
+
+        if not has_ai:
+             ctk.CTkLabel(self.sidebar, text="(Brak pluginu AI)", font=ctk.CTkFont(size=10), text_color="gray").grid(row=r, column=0)
 
         self.main_area = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
         self.main_area.grid_rowconfigure(2, weight=1)
-        self.main_area.grid_columnconfigure(0, weight=3)
-        self.main_area.grid_columnconfigure(1, weight=1)
+        self.main_area.grid_columnconfigure(0, weight=2) # Lista
+        self.main_area.grid_columnconfigure(1, weight=3) # Podgląd (więcej miejsca)
 
         self.top_frame = ctk.CTkFrame(self.main_area, corner_radius=0, fg_color="#222222")
         self.top_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ctk.CTkLabel(self.top_frame, text="Nazwa Produktu:", font=ctk.CTkFont(weight="bold"), text_color="white").pack(side="left", padx=20, pady=15)
-        self.entry_name = ctk.CTkEntry(self.top_frame, width=400, placeholder_text="Wpisz nazwę produktu...", border_color=ME_YELLOW)
+        
+        # Sekcja zmiany nazw
+        ctk.CTkLabel(self.top_frame, text="Nazwa:", font=ctk.CTkFont(weight="bold"), text_color="white").pack(side="left", padx=(20, 5), pady=15)
+        self.entry_name = ctk.CTkEntry(self.top_frame, width=300, placeholder_text="Nazwa produktu...", border_color=ME_YELLOW)
         self.entry_name.pack(side="left", padx=5, pady=15)
-        ctk.CTkButton(self.top_frame, text="WKLEJ", command=self.paste_from_clipboard, width=60, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
-        ctk.CTkButton(self.top_frame, text="ZASTOSUJ I ZMIEŃ NAZWY", command=self.rename_files, fg_color="#2CC937", text_color="black", width=220, font=ctk.CTkFont(weight="bold")).pack(side="left", padx=20, pady=15)
+        ctk.CTkButton(self.top_frame, text="WKLEJ", command=self.paste_from_clipboard, width=50, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
+        
+        ctk.CTkLabel(self.top_frame, text="Start nr:", font=ctk.CTkFont(weight="bold"), text_color="white").pack(side="left", padx=(15, 5))
+        self.entry_start_num = ctk.CTkEntry(self.top_frame, width=50, border_color=ME_YELLOW, justify="center")
+        self.entry_start_num.insert(0, "1")
+        self.entry_start_num.pack(side="left", padx=5)
+
+        ctk.CTkButton(self.top_frame, text="ZMIEŃ NAZWY (ZAZNACZONE)", command=self.rename_files, fg_color="#2CC937", text_color="black", width=200, font=ctk.CTkFont(weight="bold")).pack(side="left", padx=20, pady=15)
 
         self.list_frame = ctk.CTkFrame(self.main_area, corner_radius=10, fg_color="transparent")
         self.list_frame.grid(row=2, column=0, sticky="nsew", padx=15, pady=15)
@@ -125,17 +188,22 @@ class AsystentApp(ctk.CTk):
         style.map('Treeview', background=[('selected', ME_YELLOW)], foreground=[('selected', 'black')])
         style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat", font=("Segoe UI", 10, "bold"))
         
-        self.tree = ttk.Treeview(self.list_frame, columns=("lp", "nazwa", "rozmiar", "wymiar", "akcja"), show="headings", selectmode="extended")
+        # Dodano kolumnę 'chk' do wyboru
+        self.tree = ttk.Treeview(self.list_frame, columns=("chk", "lp", "nazwa", "rozmiar", "wymiar", "akcja"), show="headings", selectmode="extended")
+        self.tree.heading("chk", text="Zmień", anchor="center")
         self.tree.heading("lp", text="Lp.", anchor="center")
         self.tree.heading("nazwa", text="Nazwa pliku", anchor="w")
         self.tree.heading("rozmiar", text="Rozmiar", anchor="center")
         self.tree.heading("wymiar", text="Wymiar", anchor="center")
         self.tree.heading("akcja", text="Folder", anchor="center")
-        self.tree.column("lp", width=50, anchor="center")
-        self.tree.column("nazwa", width=400)
-        self.tree.column("rozmiar", width=100)
-        self.tree.column("wymiar", width=120)
-        self.tree.column("akcja", width=60, anchor="center")
+        
+        self.tree.column("chk", width=50, anchor="center")
+        self.tree.column("lp", width=40, anchor="center")
+        self.tree.column("nazwa", width=250)
+        self.tree.column("rozmiar", width=80)
+        self.tree.column("wymiar", width=100)
+        self.tree.column("akcja", width=50, anchor="center")
+        
         self.tree.grid(row=1, column=0, sticky="nsew")
         
         scrollbar = ctk.CTkScrollbar(self.list_frame, command=self.tree.yview, fg_color="transparent", button_color="#444444", button_hover_color="#666666")
@@ -154,7 +222,7 @@ class AsystentApp(ctk.CTk):
 
         self.preview_frame = ctk.CTkFrame(self.main_area, corner_radius=10, fg_color="#222222")
         self.preview_frame.grid(row=2, column=1, sticky="nsew", padx=15, pady=15)
-        self.preview_frame.grid_propagate(False)
+        self.preview_frame.grid_propagate(False) # Frame nie kurczy się do zawartości
         self.preview_frame.grid_columnconfigure(0, weight=1)
         self.preview_frame.grid_rowconfigure(0, weight=0)
         self.preview_frame.grid_rowconfigure(1, weight=1)
@@ -162,6 +230,9 @@ class AsystentApp(ctk.CTk):
         ctk.CTkLabel(self.preview_frame, text="Podgląd", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, pady=10)
         self.lbl_preview = tk.Label(self.preview_frame, text="Wybierz plik", fg="gray", bg="#222222", font=("Segoe UI", 10))
         self.lbl_preview.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        
+        # Bind do zmiany rozmiaru okna
+        self.preview_frame.bind("<Configure>", self.resize_preview_event)
 
         self.status_label = ctk.CTkLabel(self.main_area, text="Gotowy", anchor="w", text_color="gray")
         self.status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5,10), padx=20)
@@ -224,31 +295,52 @@ class AsystentApp(ctk.CTk):
         clean_base = self.clean_filename(base)
         self.entry_name.delete(0, tk.END)
         self.entry_name.insert(0, clean_base)
+        
+        try:
+            start_num = int(self.entry_start_num.get())
+        except ValueError:
+            start_num = 1
+            self.entry_start_num.delete(0, tk.END)
+            self.entry_start_num.insert(0, "1")
+
         items = self.tree.get_children()
         if not items: return
-        count = 1
-        renamed = 0
+        
+        # Licznik tylko dla zmienianych plików
+        current_num = start_num
+        renamed_count = 0
+        
         for item in items:
+            vals = self.tree.item(item)['values']
+            should_rename = (vals[0] == "☑") # Sprawdź status checkboxa
+            
+            if not should_rename:
+                # Jeśli odznaczony, tylko zaktualizuj Lp. (opcjonalnie) lub pomiń
+                continue
+
             old_path = self.tree.item(item)['tags'][0]
             if not os.path.exists(old_path): continue
+            
             folder = os.path.dirname(old_path)
             ext = os.path.splitext(old_path)[1]
-            new_filename = f"{clean_base}-{count}{ext}"
+            new_filename = f"{clean_base}-{current_num}{ext}"
             new_path = os.path.join(folder, new_filename)
+            
             if old_path != new_path:
                 try:
                     os.rename(old_path, new_path)
                     size = os.path.getsize(new_path)
                     name = os.path.basename(new_path)
-                    dim = self.tree.item(item)['values'][3]
-                    self.tree.item(item, values=(count, name, self.format_bytes(size), dim, "📂"), tags=[new_path])
-                    renamed += 1
+                    dim = vals[4]
+                    # Zachowaj checkbox zaznaczony
+                    self.tree.item(item, values=("☑", vals[1], name, self.format_bytes(size), dim, "📂"), tags=[new_path])
+                    renamed_count += 1
                 except Exception as e: print(f"Rename err: {e}")
-            else:
-                self.tree.set(item, "lp", str(count))
-            count += 1
+            
+            current_num += 1
+
         self.update_indexes()
-        self.status_label.configure(text=f"Zmieniono nazwy dla {renamed} plików.")
+        self.status_label.configure(text=f"Zmieniono nazwy dla {renamed_count} plików.")
 
     def on_tree_click(self, event):
         self.hide_context_menu(event)
@@ -257,9 +349,28 @@ class AsystentApp(ctk.CTk):
             column = self.tree.identify_column(event.x)
             row_id = self.tree.identify_row(event.y)
             if not row_id: return
-            file_path = self.tree.item(row_id)['tags'][0]
-            if column == "#5": self.open_file_location(file_path)
-            else: self.show_preview(file_path)
+            
+            # Obsługa kliknięcia w checkbox (kolumna #1 to 'chk')
+            if column == "#1":
+                self.toggle_check(row_id)
+            elif column == "#6": # Teraz folder to kolumna 6
+                file_path = self.tree.item(row_id)['tags'][0]
+                self.open_file_location(file_path)
+            else:
+                file_path = self.tree.item(row_id)['tags'][0]
+                self.show_preview(file_path)
+
+    def toggle_check(self, item_id):
+        current = self.tree.item(item_id)['values'][0]
+        new_val = "☐" if current == "☑" else "☑"
+        vals = list(self.tree.item(item_id)['values'])
+        vals[0] = new_val
+        self.tree.item(item_id, values=tuple(vals))
+
+    def resize_preview_event(self, event):
+        # Wywoływane gdy ramka podglądu zmienia rozmiar
+        if self.current_preview_path:
+            self.show_preview(self.current_preview_path)
 
     def show_context_menu(self, event):
         try:
@@ -314,52 +425,46 @@ class AsystentApp(ctk.CTk):
                 self.lbl_preview.configure(text="Plik nie istnieje", image="")
                 self.update_indexes()
                 return
+            
+            # Pobierz aktualne wymiary ramki podglądu
+            frame_w = self.preview_frame.winfo_width()
+            frame_h = self.preview_frame.winfo_height()
+            
+            # Jeśli ramka jest zbyt mała (np. przy starcie), ustaw domyślne minimum
+            if frame_w < 50: frame_w = 400
+            if frame_h < 50: frame_h = 400
+
+            # Odejmij marginesy
+            max_w = frame_w - 20
+            max_h = frame_h - 40 # trochę więcej na etykietę "Podgląd"
+
             self.lbl_preview.configure(image="", text="Ładowanie...")
-            self.update_idletasks()
+            # self.update_idletasks() # Może powodować migotanie przy resize, opcjonalne
+
             pil_image = Image.open(file_path)
             w, h = pil_image.size
-            max_s = 400
-            r = min(max_s/w, max_s/h)
+            
+            # Skalowanie z zachowaniem proporcji
+            r = min(max_w/w, max_h/h)
             new_w = int(w * r)
             new_h = int(h * r)
+            
+            # Zapobiegaj skalowaniu w górę jeśli obraz jest mniejszy niż ramka (opcjonalne, tutaj skalujemy w dół)
+            # if r > 1: r = 1 ...
+            
             resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
             tk_image = ImageTk.PhotoImage(resized)
             self.preview_image_ref = tk_image
             self.lbl_preview.configure(image=tk_image, text="")
             self.current_preview_path = file_path
         except Exception as e:
+            # print(f"Preview err: {e}")
             self.lbl_preview.configure(image="", text="Błąd wyświetlania")
 
     def add_images(self):
-        if shutil.which("kdialog"): self.add_images_kdialog()
-        else:
-            types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
-            files = filedialog.askopenfilenames(filetypes=types)
-            if files: self.process_added_files(files)
-
-    def add_images_kdialog(self):
-        try:
-            cmd = [
-                "kdialog", "--getopenfilename", os.path.expanduser("~"), 
-                "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF",
-                "--multiple"
-            ]
-            output = subprocess.check_output(cmd).decode("utf-8").strip()
-            if not output: return
-
-            if '\n' in output:
-                files = output.split('\n')
-            else:
-                files = shlex.split(output)
-            
-            clean_files = [f.replace('file://', '').strip() for f in files if f.strip()]
-            self.process_added_files(clean_files)
-            
-        except Exception as e:
-            print(f"kdialog fail: {e}")
-            types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
-            files = filedialog.askopenfilenames(filetypes=types)
-            if files: self.process_added_files(files)
+        types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
+        files = filedialog.askopenfilenames(filetypes=types)
+        if files: self.process_added_files(files)
 
     def process_added_files(self, files):
         for path in files:
@@ -380,7 +485,8 @@ class AsystentApp(ctk.CTk):
             try:
                 with Image.open(path) as img: res = f"{img.width}x{img.height} px"
             except: pass
-            self.tree.insert("", "end", values=("", name, self.format_bytes(size), res, "📂"), tags=[path])
+            # Dodano "☑" jako wartość dla kolumny "chk"
+            self.tree.insert("", "end", values=("☑", "", name, self.format_bytes(size), res, "📂"), tags=[path])
         except: pass
 
     def remove_selected(self):
@@ -466,7 +572,8 @@ class AsystentApp(ctk.CTk):
                             size = os.path.getsize(save_path)
                             dim = f"{res.width}x{res.height} px"
                             vals = self.tree.item(item)['values']
-                            self.tree.item(item, values=(vals[0], os.path.basename(save_path), self.format_bytes(size), dim, "📂"), tags=[save_path])
+                            # Zachowaj stan checkboxa (vals[0])
+                            self.tree.item(item, values=(vals[0], vals[1], os.path.basename(save_path), self.format_bytes(size), dim, "📂"), tags=[save_path])
                             if self.current_preview_path == path: self.show_preview(save_path)
 
             except Exception as e:
@@ -497,6 +604,130 @@ class AsystentApp(ctk.CTk):
                 with open(path, "wb") as f: f.write(buffer.getbuffer())
                 return
             scale *= 0.9
+
+    def ai_upscale_x4(self):
+        selected = self.tree.selection()
+        if not selected: return messagebox.showwarning("Info", "Wybierz pliki.")
+        if not hasattr(self, 'ai_tool_path') or not self.ai_tool_path:
+             return messagebox.showerror("Błąd", "Nie znaleziono narzędzia AI (realesrgan-ncnn-vulkan).")
+
+        # Pobierz cel w pikselach
+        try:
+            target_px = int(self.entry_ai_target.get())
+        except ValueError:
+            target_px = 3000 # Fallback
+
+        overwrite = self.overwrite_var.get()
+        self.status_label.configure(text=f"Przetwarzanie AI Smart x2 (Max {target_px}px)...")
+        self.update_idletasks()
+
+        processed_count = 0
+        
+        for item in selected:
+            path = self.tree.item(item)['tags'][0]
+            if not os.path.exists(path): continue
+            
+            try:
+                original_dir = os.path.dirname(path)
+                filename = os.path.basename(path)
+                name_root, ext = os.path.splitext(filename)
+                
+                # Zawsze tworzymy plik tymczasowy po AI
+                temp_ai_out = os.path.join(original_dir, f"{name_root}_ai_raw{ext}")
+
+                cmd = [
+                    self.ai_tool_path,
+                    "-i", path,
+                    "-o", temp_ai_out,
+                    "-s", "2", # Zmiana na x2
+                    "-n", "realesr-animevideov3-x2" # Jawny model x2
+                ]
+                
+                # Jeśli uruchamiamy z OneFile, modele są w katalogu tymczasowym.
+                # Realesrgan szuka modeli w folderze 'models' obok siebie lub wskazanym przez -m
+                if hasattr(sys, '_MEIPASS'):
+                    # Wskazujemy folder models wewnątrz temp
+                    models_path = os.path.join(sys._MEIPASS, "models")
+                    cmd.extend(["-m", models_path])
+
+                startupinfo = None
+                if platform.system() == "Windows":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                my_env = os.environ.copy()
+                if 'LD_LIBRARY_PATH' in my_env: del my_env['LD_LIBRARY_PATH']
+
+                subprocess.run(cmd, check=True, startupinfo=startupinfo, env=my_env)
+                
+                if not os.path.exists(temp_ai_out):
+                    raise Exception("AI failed output")
+
+                # Krok 2: Smart Downscale (jeśli potrzebny)
+                final_image_path = temp_ai_out # Domyślnie bierzemy surowy wynik AI
+                
+                try:
+                    with Image.open(temp_ai_out) as img:
+                        w, h = img.size
+                        # Sprawdź czy trzeba zmniejszyć
+                        if max(w, h) > target_px:
+                            scale = target_px / max(w, h)
+                            new_w = int(w * scale)
+                            new_h = int(h * scale)
+                            # Wysokiej jakości downscale
+                            resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                            # Nadpisz tymczasowy
+                            resized.save(temp_ai_out)
+                except Exception as e:
+                    print(f"Smart Resize Err: {e}")
+
+                # Krok 3: Finalizacja (Nadpisz lub Nowy Plik)
+                if overwrite:
+                    orig_archive_dir = os.path.join(original_dir, "_orig")
+                    os.makedirs(orig_archive_dir, exist_ok=True)
+                    archived_path = os.path.join(original_dir, filename)
+                    
+                    if not os.path.exists(archived_path):
+                        os.rename(path, archived_path)
+                    else:
+                        os.remove(path)
+                    
+                    os.rename(temp_ai_out, path)
+                    final_result_path = path
+                else:
+                    new_filename = f"{name_root}_SmartAI{ext}"
+                    save_path = os.path.join(original_dir, new_filename)
+                    if os.path.exists(save_path): os.remove(save_path)
+                    os.rename(temp_ai_out, save_path)
+                    final_result_path = save_path
+
+                # GUI Update
+                if os.path.exists(final_result_path):
+                    size = os.path.getsize(final_result_path)
+                    with Image.open(final_result_path) as img:
+                        dim = f"{img.width}x{img.height} px"
+                    
+                    vals = self.tree.item(item)['values']
+                    if overwrite:
+                         self.tree.item(item, values=(vals[0], vals[1], os.path.basename(final_result_path), self.format_bytes(size), dim, "📂"), tags=[final_result_path])
+                         if self.current_preview_path == path: self.show_preview(final_result_path)
+                    else:
+                        self.file_list.remove(path)
+                        self.file_list.append(final_result_path)
+                        self.tree.item(item, values=(vals[0], vals[1], os.path.basename(final_result_path), self.format_bytes(size), dim, "📂"), tags=[final_result_path])
+
+                    processed_count += 1
+
+            except Exception as e:
+                print(f"AI Error: {e}")
+                self.status_label.configure(text=f"Błąd AI: {os.path.basename(path)}")
+                # Sprzątaj temp
+                try: 
+                    if 'temp_ai_out' in locals() and os.path.exists(temp_ai_out): os.remove(temp_ai_out)
+                except: pass
+        
+        self.update_indexes()
+        self.status_label.configure(text=f"Zakończono Smart AI: {processed_count} plików.")
 
     def convert_to_jpg(self): self.process_images("JPG", lambda i: i.convert("RGB"))
     def smart_compress_3mb(self): self.process_images("Kompresja3MB", lambda i: i)
@@ -530,10 +761,26 @@ class AsystentApp(ctk.CTk):
         def f(i):
             w, h = i.size
             if w < 500 or h < 500:
-                r = max(500/w, 500/h)
-                return i.resize((int(w*r), int(h*r)), Image.Resampling.LANCZOS)
+                # Nowa logika: Dopełnienie do 500px białym tłem, bez skalowania
+                new_w = max(w, 500)
+                new_h = max(h, 500)
+                
+                # Konwersja na odpowiedni tryb dla tła
+                if i.mode == 'RGBA':
+                    bg = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255)) # Białe tło
+                    # Wklejamy na środek
+                    x = (new_w - w) // 2
+                    y = (new_h - h) // 2
+                    bg.paste(i, (x, y), i) # Używamy i jako maski dla przezroczystości
+                    return bg
+                else:
+                    bg = Image.new("RGB", (new_w, new_h), "white")
+                    x = (new_w - w) // 2
+                    y = (new_h - h) // 2
+                    bg.paste(i, (x, y))
+                    return bg
             return i
-        self.process_images("Upscale", f)
+        self.process_images("Upscale(Tło)", f)
     def downscale_custom(self):
         def f(i):
             w, h = i.size

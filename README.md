@@ -75,3 +75,13 @@ Ten projekt jest objęty licencją MIT. Szczegóły znajdziesz w pliku `LICENSE`
 
 ## Zastrzeżenie
 **Niniejszy program jest niezależnym projektem i nie jest oficjalnym produktem ani nie jest w żaden sposób powiązany z firmą Media Expert.** Został stworzony wyłącznie w celach edukacyjnych i użytkowych.
+
+## Użyte technologie i licencje
+Ten projekt jest udostępniany na licencji **MIT**. Wykorzystuje on jednak zewnętrzne biblioteki i narzędzia, które podlegają własnym licencjom:
+
+- **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** - MIT License
+- **[Pillow (PIL)](https://python-pillow.org/)** - HPND License
+- **[Real-ESRGAN ncnn Vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan)** - MIT License (Copyright (c) 2021, xinntao)
+- **Python** - PSF License
+
+Pełne teksty licencji komponentów zewnętrznych znajdują się w ich repozytoriach lub dokumentacji.
