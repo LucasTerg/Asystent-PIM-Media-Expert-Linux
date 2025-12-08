@@ -43,25 +43,25 @@ Zalecane jest użycie wirtualnego środowiska:
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r LinuxPort/requirements.txt
+pip install -r requirements.txt
 ```
 Jeśli budujesz w środowisku `distrobox` na Arch Linux, możesz użyć:
 ```bash
 distrobox-enter -n arch -- sudo pacman -S --noconfirm python-pip python-pillow python-avif-plugin python-heif-plugin tk
-distrobox-enter -n arch -- python -m pip install -r LinuxPort/requirements.txt --break-system-packages
+distrobox-enter -n arch -- python -m pip install -r requirements.txt --break-system-packages
 ```
 *(Uwaga: paczki AVIF/HEIF na Archu to `python-avif-plugin` i `python-heif-plugin` w AUR lub `pillow-avif-plugin` i `pillow-heif` przez `pip`)*
 
 ### Krok 3: Uruchomienie aplikacji
 ```bash
-python LinuxPort/main.py
+python main.py
 ```
 
 ### Krok 4: Budowanie samodzielnego pliku wykonywalnego (binarnego)
 Aby stworzyć jeden plik wykonywalny, który będzie działał bez instalacji Pythona (Linux ELF):
 ```bash
 pip install pyinstaller # Jeśli nie jest zainstalowany
-pyinstaller --noconfirm --onefile --windowed --name "AsystentMediaExpert" --collect-all customtkinter --hidden-import='PIL._tkinter_finder' LinuxPort/main.py
+pyinstaller --noconfirm --onefile --windowed --name "AsystentMediaExpert" --collect-all customtkinter --hidden-import='PIL._tkinter_finder' main.py
 ```
 Gotowy plik znajdziesz w folderze `dist/`.
 
