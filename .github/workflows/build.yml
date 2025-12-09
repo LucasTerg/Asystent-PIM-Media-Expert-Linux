@@ -80,7 +80,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.x' # Użyj dowolnej dostępnej wersji Pythona 3.x
+        python-version: '3.12' # Wymuszamy stabilną wersję 3.12 zamiast 3.x (która brała 3.14)
 
     - name: Install Dependencies
       run: |
@@ -89,10 +89,8 @@ jobs:
         pip install --upgrade pip
         pip install -r requirements.txt
         pip install tkinterdnd2 pyinstaller
-        # Instalacja zależności systemowych dla macOS (Homebrew)
-        # brew install cairo pkg-config gobject-introspection gtk+3
-        # Uwaga: macOS ma tkinter preinstalowany z Pythonem systemowym, ale dla PyGObject i Cairo mogą być potrzebne
-        # Zależności dla pillow-heif/avif na macOS mogą wymagać: brew install libheif libavif
+        # Instalacja zależności systemowych dla macOS (Homebrew) - odkomentowane i dodane
+        brew install cairo pkg-config gobject-introspection gtk+3 libheif libavif
 
     - name: Build with PyInstaller
       run: |
