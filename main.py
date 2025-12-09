@@ -31,22 +31,19 @@ class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.3") # Zmieniono na v1.0.3
+        self.title("Asystent PIM Media Expert v1.0.3") # Utrzymano wersję 1.0.3
         self.geometry("1350x900")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.file_list = []
         
-        # Zmieniono domyślną wartość na False
         self.overwrite_var = ctk.BooleanVar(value=False) 
         
         self.current_preview_path = None
         self.preview_image_ref = None 
         
-        # Słownik do przechowywania zmiennych widoczności menu
-        self.view_vars = {} 
-        # Słownik do przechowywania referencji do widgetów w sidebarze
+        self.view_vars = {}
         self.sidebar_widgets = {}
         
         self.bind("<Button-1>", self.hide_context_menu)
@@ -70,23 +67,42 @@ class AsystentApp(ctk.CTk):
             return output.getvalue()
 
     def check_ai_tools(self):
-        self.ai_tool_path = shutil.which("realesrgan-ncnn-vulkan")
+        # Określanie nazwy pliku binarnego w zależności od systemu
+        system_platform = platform.system()
+        if system_platform == "Windows":
+            bin_name = "realesrgan-ncnn-vulkan.exe"
+        elif system_platform == "Darwin": # macOS
+            bin_name = "realesrgan-ncnn-vulkan-mac"
+        else: # Linux
+            bin_name = "realesrgan-ncnn-vulkan"
+
+        # 1. Sprawdź czy binary istnieje w systemie (PATH)
+        self.ai_tool_path = shutil.which(bin_name)
         if self.ai_tool_path: return True
         
+        # 2. Sprawdź obok pliku skryptu (dla repozytorium/struktury folderów)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        script_bin = os.path.join(script_dir, "realesrgan-ncnn-vulkan")
+        script_bin = os.path.join(script_dir, bin_name)
         if os.path.exists(script_bin) and os.access(script_bin, os.X_OK):
             self.ai_tool_path = script_bin
             return True
 
-        local_bin = os.path.abspath("realesrgan-ncnn-vulkan")
+        # 3. Sprawdź w bieżącym katalogu roboczym
+        local_bin = os.path.abspath(bin_name)
         if os.path.exists(local_bin) and os.access(local_bin, os.X_OK):
             self.ai_tool_path = local_bin
             return True
 
+        # 4. Sprawdź w katalogu tymczasowym PyInstallera (dla OneFile)
         if hasattr(sys, '_MEIPASS'):
-            temp_bin = os.path.join(sys._MEIPASS, "realesrgan-ncnn-vulkan")
-            if os.path.exists(temp_bin) and os.access(temp_bin, os.X_OK):
+            temp_bin = os.path.join(sys._MEIPASS, bin_name)
+            # Na macOS wewnątrz .app binarka może nie mieć atrybutu executable po rozpakowaniu
+            if os.path.exists(temp_bin): 
+                # Próba nadania uprawnień wykonywania (ważne dla Linux/macOS po rozpakowaniu z OneFile)
+                try:
+                    os.chmod(temp_bin, 0o755)
+                except:
+                    pass
                 self.ai_tool_path = temp_bin
                 return True
                 
@@ -155,7 +171,7 @@ class AsystentApp(ctk.CTk):
         self.lbl_quality = ctk.CTkLabel(self.frame_quality, text="Jakość: 100", text_color="white")
         self.lbl_quality.pack()
         self.slider_quality = ctk.CTkSlider(self.frame_quality, from_=10, to=100, number_of_steps=90, command=self.update_quality_label, width=180, progress_color=ME_YELLOW, button_color="white", button_hover_color=ME_YELLOW)
-        self.slider_quality.set(100) # Ustawiono na 100%
+        self.slider_quality.set(100)
         self.slider_quality.pack()
         current_row += 1
 
@@ -220,7 +236,7 @@ class AsystentApp(ctk.CTk):
         if has_ai:
             self.frame_ai = ctk.CTkFrame(self.sidebar, fg_color="transparent")
             self.frame_ai.grid(row=current_row, column=0, pady=(5,0))
-            self.sidebar_widgets['frame_ai_settings'] = {'widget': self.frame_ai, 'row': current_row} # Dla ukrywania ustawień AI
+            self.sidebar_widgets['frame_ai_settings'] = {'widget': self.frame_ai, 'row': current_row} 
             ctk.CTkLabel(self.frame_ai, text="Max Px:", text_color="gray", font=ctk.CTkFont(size=11)).pack(side="left", padx=2)
             self.entry_ai_target = ctk.CTkEntry(self.frame_ai, width=60, height=25, border_color="#6A0DAD", justify="center")
             self.entry_ai_target.insert(0, "3000")
@@ -239,7 +255,7 @@ class AsystentApp(ctk.CTk):
             self.sidebar_widgets['lbl_no_ai'] = {'widget': self.lbl_no_ai, 'row': current_row}
             current_row += 1
 
-        # MAIN AREA (Prawej strona)
+        # MAIN AREA
         self.main_area = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
         self.main_area.grid_rowconfigure(2, weight=1)
@@ -337,7 +353,7 @@ class AsystentApp(ctk.CTk):
         file_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Plik", menu=file_menu)
         file_menu.add_command(label="Dodaj obrazy", command=self.add_images)
-        file_menu.add_command(label="Dodaj folder", command=self.add_folder) # Nowa opcja
+        file_menu.add_command(label="Dodaj folder", command=self.add_folder)
         file_menu.add_separator()
         file_menu.add_command(label="Zakończ", command=self.quit)
 
@@ -345,17 +361,14 @@ class AsystentApp(ctk.CTk):
         view_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Widok", menu=view_menu)
         
-        # Helper do dodawania checkboxów w menu
         def add_toggle(label, widget_key, default=True):
             var = tk.BooleanVar(value=default)
             self.view_vars[label] = var
             widget_data = self.sidebar_widgets.get(widget_key)
             if widget_data:
                 widget = widget_data['widget']
-                # command wywołuje toggle_widget z konkretnymi argumentami
                 view_menu.add_checkbutton(label=label, variable=var, 
                                           command=lambda w=widget, v=var, k=widget_key: self.toggle_widget(w, v, k))
-                # Initial state based on default value
                 if not default:
                     widget.grid_remove()
             else:
@@ -363,11 +376,9 @@ class AsystentApp(ctk.CTk):
                                           command=lambda: print(f"Widget {widget_key} not found"))
             return var
 
-        # Nagłówek Aplikacji
         add_toggle("Nagłówek aplikacji", 'lbl_app_title')
-        add_toggle("Media Expert Logo", 'lbl_me_expert', default=False) # Domyślnie ukryte
+        add_toggle("Media Expert Logo", 'lbl_me_expert', default=False)
 
-        # BLOK 1: GŁÓWNE
         view_menu.add_command(label="--- Główne ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b1')
         add_toggle("Dodaj obrazy", 'btn_add')
@@ -375,21 +386,18 @@ class AsystentApp(ctk.CTk):
         add_toggle("Usuń zaznaczenie", 'btn_remove')
         add_toggle("Kolejność (przyciski)", 'frame_order') 
         
-        # BLOK 2: USTAWIENIA
         view_menu.add_separator()
         view_menu.add_command(label="--- Ustawienia ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b2')
         add_toggle("Jakość JPG (slider)", 'frame_quality')
         add_toggle("Nadpisz pliki (checkbox)", 'chk_overwrite')
         
-        # BLOK 3: KONWERSJA
         view_menu.add_separator()
         view_menu.add_command(label="--- Konwersja ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b3')
         add_toggle("Konwertuj do JPG", 'btn_jpg')
-        add_toggle("Konwertuj do WebP", 'btn_webp', default=False) # Domyślnie ukryte
+        add_toggle("Konwertuj do WebP", 'btn_webp', default=False)
         
-        # BLOK 4: EDYCJA I SKALOWANIE
         view_menu.add_separator()
         view_menu.add_command(label="--- Edycja i Skalowanie ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b4')
@@ -607,7 +615,7 @@ class AsystentApp(ctk.CTk):
                         count += 1
             self.status_label.configure(text=f"Zapisano {count} plików do {os.path.basename(target_zip)}")
             messagebox.showinfo("Sukces", f"Utworzono archiwum ZIP:\n{target_zip}")
-        except Exception as e:
+        except Exception as e: 
             messagebox.showerror("Błąd", f"Nie udało się utworzyć ZIP: {e}")
 
     def open_path(self, path):
