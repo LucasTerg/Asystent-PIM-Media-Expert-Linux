@@ -65,7 +65,7 @@ jobs:
         tag_name: ${{ github.ref }}
         name: Release ${{ github.ref }}
         generate_release_notes: true
-        body_path: RELEASE_NOTES.md # Opcjonalnie: plik z opisem release
+
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
