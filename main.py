@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox, ttk, Menu
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageTk, UnidentifiedImageError
 import os
+import sys
 import datetime
 import re
 import subprocess
@@ -10,8 +11,9 @@ import platform
 import pillow_avif
 import pillow_heif
 import shutil
-import shlex # DO PARSOWANIA ŚCIEŻEK
+import shlex 
 import io
+import zipfile
 
 # Wyłącz limit pikseli dla dużych obrazów z AI
 Image.MAX_IMAGE_PIXELS = None
@@ -57,24 +59,20 @@ class AsystentApp(ctk.CTk):
             return output.getvalue()
 
     def check_ai_tools(self):
-        # 1. Sprawdź czy binary istnieje w systemie
         self.ai_tool_path = shutil.which("realesrgan-ncnn-vulkan")
         if self.ai_tool_path: return True
         
-        # 2. Sprawdź obok pliku skryptu (dla repozytorium/struktury folderów)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         script_bin = os.path.join(script_dir, "realesrgan-ncnn-vulkan")
         if os.path.exists(script_bin) and os.access(script_bin, os.X_OK):
             self.ai_tool_path = script_bin
             return True
 
-        # 3. Sprawdź w bieżącym katalogu roboczym (dla kompatybilności wstecznej)
         local_bin = os.path.abspath("realesrgan-ncnn-vulkan")
         if os.path.exists(local_bin) and os.access(local_bin, os.X_OK):
             self.ai_tool_path = local_bin
             return True
 
-        # 4. Sprawdź w katalogu tymczasowym PyInstallera (dla OneFile)
         if hasattr(sys, '_MEIPASS'):
             temp_bin = os.path.join(sys._MEIPASS, "realesrgan-ncnn-vulkan")
             if os.path.exists(temp_bin) and os.access(temp_bin, os.X_OK):
@@ -97,23 +95,23 @@ class AsystentApp(ctk.CTk):
         ctk.CTkButton(self.sidebar, text="WYCZYŚĆ LISTĘ", command=self.clear_list, fg_color="#444444", text_color="white", hover_color="#666666", width=200, height=35).grid(row=3, column=0, padx=15, pady=5)
         ctk.CTkButton(self.sidebar, text="USUŃ ZAZNACZONY", command=self.remove_selected, fg_color="transparent", border_width=1, border_color="gray50", text_color="gray80", width=200).grid(row=4, column=0, padx=15, pady=5)
 
-        ctk.CTkLabel(self.sidebar, text="KOLEJNOŚĆ", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=5, column=0, padx=20, pady=(15,5))
+        ctk.CTkLabel(self.sidebar, text="KOLEJNOŚĆ", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=6, column=0, padx=20, pady=(15,5))
         move_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        move_frame.grid(row=6, column=0)
+        move_frame.grid(row=7, column=0)
         ctk.CTkButton(move_frame, text="▲", command=self.move_up, width=95, height=30, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
         ctk.CTkButton(move_frame, text="▼", command=self.move_down, width=95, height=30, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
 
-        ctk.CTkLabel(self.sidebar, text="USTAWIENIA JPG", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=7, column=0, padx=20, pady=(15,5))
+        ctk.CTkLabel(self.sidebar, text="USTAWIENIA JPG", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=8, column=0, padx=20, pady=(15,5))
         self.lbl_quality = ctk.CTkLabel(self.sidebar, text="Jakość: 95", text_color="white")
-        self.lbl_quality.grid(row=8, column=0, padx=20, pady=0)
+        self.lbl_quality.grid(row=9, column=0, padx=20, pady=0)
         self.slider_quality = ctk.CTkSlider(self.sidebar, from_=10, to=100, number_of_steps=90, command=self.update_quality_label, width=180, progress_color=ME_YELLOW, button_color="white", button_hover_color=ME_YELLOW)
         self.slider_quality.set(95)
-        self.slider_quality.grid(row=9, column=0, padx=20, pady=5)
+        self.slider_quality.grid(row=10, column=0, padx=20, pady=5)
 
         self.chk_overwrite = ctk.CTkCheckBox(self.sidebar, text="Nadpisz pliki", variable=self.overwrite_var, font=ctk.CTkFont(size=12), text_color="white", fg_color=ME_YELLOW, hover_color=ME_YELLOW_HOVER, checkmark_color="black")
-        self.chk_overwrite.grid(row=10, column=0, padx=25, pady=10, sticky="w")
+        self.chk_overwrite.grid(row=11, column=0, padx=25, pady=10, sticky="w")
 
-        ctk.CTkLabel(self.sidebar, text="OPERACJE", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=11, column=0, padx=20, pady=(10,5))
+        ctk.CTkLabel(self.sidebar, text="OPERACJE", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=12, column=0, padx=20, pady=(10,5))
 
         ops = [
             ("KONWERTUJ DO JPG", self.convert_to_jpg),
@@ -125,15 +123,13 @@ class AsystentApp(ctk.CTk):
             ("KOMPRESUJ DO 3 MB", self.smart_compress_3mb)
         ]
 
-        # Sprawdź AI
         has_ai = self.check_ai_tools()
         if has_ai:
             ops.append(("AI SMART UPSCALE", self.ai_upscale_x4))
 
-        r = 12
+        r = 13
         for text, cmd in ops:
             if text == "AI SMART UPSCALE":
-                 # Dodatkowy wiersz na ustawienia AI
                  ai_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
                  ai_frame.grid(row=r, column=0, pady=(5,0))
                  ctk.CTkLabel(ai_frame, text="Max Px:", text_color="gray", font=ctk.CTkFont(size=11)).pack(side="left", padx=2)
@@ -142,8 +138,6 @@ class AsystentApp(ctk.CTk):
                  self.entry_ai_target.pack(side="left", padx=2)
                  
                  r += 1
-                 
-                 # Kopia stylu dla przycisku AI
                  btn_ai = btn_me.copy()
                  btn_ai.update({"fg_color": "#6A0DAD", "hover_color": "#800080"})
                  ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_ai).grid(row=r, column=0, padx=15, pady=5)
@@ -157,13 +151,12 @@ class AsystentApp(ctk.CTk):
         self.main_area = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
         self.main_area.grid_rowconfigure(2, weight=1)
-        self.main_area.grid_columnconfigure(0, weight=2) # Lista
-        self.main_area.grid_columnconfigure(1, weight=3) # Podgląd (więcej miejsca)
+        self.main_area.grid_columnconfigure(0, weight=2)
+        self.main_area.grid_columnconfigure(1, weight=3)
 
         self.top_frame = ctk.CTkFrame(self.main_area, corner_radius=0, fg_color="#222222")
         self.top_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
         
-        # Sekcja zmiany nazw
         ctk.CTkLabel(self.top_frame, text="Nazwa:", font=ctk.CTkFont(weight="bold"), text_color="white").pack(side="left", padx=(20, 5), pady=15)
         self.entry_name = ctk.CTkEntry(self.top_frame, width=300, placeholder_text="Nazwa produktu...", border_color=ME_YELLOW)
         self.entry_name.pack(side="left", padx=5, pady=15)
@@ -180,15 +173,19 @@ class AsystentApp(ctk.CTk):
         self.list_frame.grid(row=2, column=0, sticky="nsew", padx=15, pady=15)
         self.list_frame.grid_columnconfigure(0, weight=1)
         self.list_frame.grid_rowconfigure(1, weight=1)
+        
+        # Double-click w ramkę otwiera dodawanie
+        self.list_frame.bind("<Double-Button-1>", lambda e: self.add_images())
+
         ctk.CTkLabel(self.list_frame, text="Lista plików", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w", padx=0, pady=5)
 
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("Treeview", background="#2b2b2b", foreground="white", rowheight=30, fieldbackground="#2b2b2b", borderwidth=0, font=("Segoe UI", 10))
+        # Przywrócono żółte tło zaznaczenia z czarnym tekstem
         style.map('Treeview', background=[('selected', ME_YELLOW)], foreground=[('selected', 'black')])
         style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat", font=("Segoe UI", 10, "bold"))
         
-        # Dodano kolumnę 'chk' do wyboru
         self.tree = ttk.Treeview(self.list_frame, columns=("chk", "lp", "nazwa", "rozmiar", "wymiar", "akcja"), show="headings", selectmode="extended")
         self.tree.heading("chk", text="Zmień", anchor="center")
         self.tree.heading("lp", text="Lp.", anchor="center")
@@ -211,6 +208,7 @@ class AsystentApp(ctk.CTk):
         self.tree.configure(yscrollcommand=scrollbar.set)
         
         self.tree.bind("<Button-1>", self.on_tree_click)
+        self.tree.bind("<Double-Button-1>", self.on_tree_double_click) # Podwójne kliknięcie w wiersz
         self.tree.bind("<Button-3>", self.show_context_menu)
 
         self.context_menu = Menu(self.main_area, tearoff=0, bg="#2D2D2D", fg="white", activebackground=ME_YELLOW, activeforeground="black")
@@ -218,11 +216,14 @@ class AsystentApp(ctk.CTk):
         self.context_menu.add_command(label="Otwórz folder pliku", command=self.open_folder_context)
         self.context_menu.add_command(label="Edytuj w GIMP", command=self.open_in_gimp)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="Zapisz zaznaczone do ZIP", command=self.save_to_zip)
         self.context_menu.add_command(label="Usuń z listy", command=self.remove_selected)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Zakończ", command=self.quit) # Dodano opcję Zakończ
 
         self.preview_frame = ctk.CTkFrame(self.main_area, corner_radius=10, fg_color="#222222")
         self.preview_frame.grid(row=2, column=1, sticky="nsew", padx=15, pady=15)
-        self.preview_frame.grid_propagate(False) # Frame nie kurczy się do zawartości
+        self.preview_frame.grid_propagate(False)
         self.preview_frame.grid_columnconfigure(0, weight=1)
         self.preview_frame.grid_rowconfigure(0, weight=0)
         self.preview_frame.grid_rowconfigure(1, weight=1)
@@ -231,11 +232,22 @@ class AsystentApp(ctk.CTk):
         self.lbl_preview = tk.Label(self.preview_frame, text="Wybierz plik", fg="gray", bg="#222222", font=("Segoe UI", 10))
         self.lbl_preview.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         
-        # Bind do zmiany rozmiaru okna
+        # Kliknięcie w podgląd otwiera plik
+        self.lbl_preview.bind("<Button-1>", self.open_preview_file)
+        
         self.preview_frame.bind("<Configure>", self.resize_preview_event)
 
         self.status_label = ctk.CTkLabel(self.main_area, text="Gotowy", anchor="w", text_color="gray")
         self.status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5,10), padx=20)
+
+    def open_preview_file(self, event):
+        if self.current_preview_path and os.path.exists(self.current_preview_path):
+            self.open_path(self.current_preview_path)
+
+    def on_tree_double_click(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item:
+            self.add_images()
 
     def update_quality_label(self, value):
         self.lbl_quality.configure(text=f"Jakość: {int(value)}")
@@ -306,7 +318,6 @@ class AsystentApp(ctk.CTk):
         items = self.tree.get_children()
         if not items: return
         
-        # Licznik tylko dla zmienianych plików
         current_num = start_num
         renamed_count = 0
         
@@ -399,6 +410,26 @@ class AsystentApp(ctk.CTk):
                 try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
                 except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP.")
 
+    def save_to_zip(self):
+        selected = self.tree.selection()
+        if not selected: return messagebox.showwarning("Info", "Wybierz pliki do spakowania.")
+        
+        target_zip = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("Plik ZIP", "*.zip")], title="Zapisz jako ZIP")
+        if not target_zip: return
+
+        count = 0
+        try:
+            with zipfile.ZipFile(target_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for item in selected:
+                    path = self.tree.item(item)['tags'][0]
+                    if os.path.exists(path):
+                        zf.write(path, os.path.basename(path))
+                        count += 1
+            self.status_label.configure(text=f"Zapisano {count} plików do {os.path.basename(target_zip)}")
+            messagebox.showinfo("Sukces", f"Utworzono archiwum ZIP:\n{target_zip}")
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Nie udało się utworzyć ZIP: {e}")
+
     def open_path(self, path):
         if not os.path.exists(path): return
         try:
@@ -462,7 +493,7 @@ class AsystentApp(ctk.CTk):
             self.lbl_preview.configure(image="", text="Błąd wyświetlania")
 
     def add_images(self):
-        types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIFF")]
+        types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIF *.TIFF")]
         files = filedialog.askopenfilenames(filetypes=types)
         if files: self.process_added_files(files)
 
