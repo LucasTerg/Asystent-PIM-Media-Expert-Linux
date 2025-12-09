@@ -20,10 +20,12 @@ jobs:
     - name: Install System Dependencies (Arch)
       run: |
         pacman -Sy --noconfirm
-        # Instalujemy narzędzia deweloperskie i biblioteki graficzne
+        # Instalujemy narzędzia deweloperskie i biblioteki graficzne oraz systemowe
+        # Dodano: cairo, pkgconf, gobject-introspection, gtk3 dla PyGObject
         pacman -S --noconfirm base-devel python python-pip tk git \
           libjpeg-turbo zlib libtiff libwebp openjpeg2 \
-          libimagequant libraqm libxcb
+          libimagequant libraqm libxcb \
+          cairo pkgconf gobject-introspection gtk3
 
     - name: Install Python Dependencies
       run: |
@@ -31,7 +33,7 @@ jobs:
         source venv/bin/activate
         pip install --upgrade pip
         
-        # Instalacja zależności z pliku (w tym pillow-avif-plugin i pillow-heif)
+        # Instalacja zależności z pliku
         pip install -r requirements.txt
         
         # Dodatkowo upewniamy się, że mamy tkinterdnd2 i pyinstaller
