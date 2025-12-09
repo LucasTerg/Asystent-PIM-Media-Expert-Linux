@@ -31,19 +31,22 @@ class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.3") # Utrzymano wersję 1.0.3
+        self.title("Asystent PIM Media Expert v1.0.4") # Zmieniono na v1.0.4
         self.geometry("1350x900")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.file_list = []
         
+        # Zmieniono domyślną wartość na False
         self.overwrite_var = ctk.BooleanVar(value=False) 
         
         self.current_preview_path = None
         self.preview_image_ref = None 
         
-        self.view_vars = {}
+        # Słownik do przechowywania zmiennych widoczności menu
+        self.view_vars = {} 
+        # Słownik do przechowywania referencji do widgetów w sidebarze
         self.sidebar_widgets = {}
         
         self.bind("<Button-1>", self.hide_context_menu)
@@ -316,6 +319,10 @@ class AsystentApp(ctk.CTk):
         self.tree.bind("<Button-1>", self.on_tree_click)
         self.tree.bind("<Double-Button-1>", self.on_tree_double_click)
         self.tree.bind("<Button-3>", self.show_context_menu)
+        
+        if platform.system() == "Darwin":
+            self.tree.bind("<Button-2>", self.show_context_menu)
+            self.tree.bind("<Control-Button-1>", self.show_context_menu)
 
         self.context_menu = Menu(self.main_area, tearoff=0, bg="#2D2D2D", fg="white", activebackground=ME_YELLOW, activeforeground="black")
         self.context_menu.add_command(label="Otwórz plik", command=self.open_file_default)
@@ -361,24 +368,30 @@ class AsystentApp(ctk.CTk):
         view_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Widok", menu=view_menu)
         
+        # Helper do dodawania checkboxów w menu
         def add_toggle(label, widget_key, default=True):
             var = tk.BooleanVar(value=default)
             self.view_vars[label] = var
             widget_data = self.sidebar_widgets.get(widget_key)
             if widget_data:
                 widget = widget_data['widget']
+                # command wywołuje toggle_widget z konkretnymi argumentami
                 view_menu.add_checkbutton(label=label, variable=var, 
                                           command=lambda w=widget, v=var, k=widget_key: self.toggle_widget(w, v, k))
+                # Initial state based on default value
                 if not default:
                     widget.grid_remove()
             else:
+                # Obsługa widgetów, które mogą nie istnieć (np. AI)
                 view_menu.add_checkbutton(label=label, variable=var, state='disabled',
                                           command=lambda: print(f"Widget {widget_key} not found"))
             return var
 
+        # Nagłówek Aplikacji
         add_toggle("Nagłówek aplikacji", 'lbl_app_title')
         add_toggle("Media Expert Logo", 'lbl_me_expert', default=False)
 
+        # BLOK 1: GŁÓWNE
         view_menu.add_command(label="--- Główne ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b1')
         add_toggle("Dodaj obrazy", 'btn_add')
@@ -386,18 +399,21 @@ class AsystentApp(ctk.CTk):
         add_toggle("Usuń zaznaczenie", 'btn_remove')
         add_toggle("Kolejność (przyciski)", 'frame_order') 
         
+        # BLOK 2: USTAWIENIA
         view_menu.add_separator()
         view_menu.add_command(label="--- Ustawienia ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b2')
         add_toggle("Jakość JPG (slider)", 'frame_quality')
         add_toggle("Nadpisz pliki (checkbox)", 'chk_overwrite')
         
+        # BLOK 3: KONWERSJA
         view_menu.add_separator()
         view_menu.add_command(label="--- Konwersja ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b3')
         add_toggle("Konwertuj do JPG", 'btn_jpg')
         add_toggle("Konwertuj do WebP", 'btn_webp', default=False)
         
+        # BLOK 4: EDYCJA I SKALOWANIE
         view_menu.add_separator()
         view_menu.add_command(label="--- Edycja i Skalowanie ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b4')
@@ -408,10 +424,10 @@ class AsystentApp(ctk.CTk):
         add_toggle("Dopasuj 3000x3600", 'btn_downscale')
         add_toggle("Kompresuj do 3 MB", 'btn_compress')
         
-        if hasattr(self, 'btn_ai'):
+        if hasattr(self, 'btn_ai'): # Sprawdź czy AI jest dostępne, zanim dodasz do menu
             view_menu.add_separator()
             add_toggle("AI Smart Upscale", 'btn_ai')
-            add_toggle("AI Settings", 'frame_ai_settings')
+            add_toggle("AI Settings", 'frame_ai_settings') # Ukrywa label i entry AI
 
         # Menu About
         about_menu = Menu(menubar, tearoff=0)
@@ -421,9 +437,9 @@ class AsystentApp(ctk.CTk):
 
     def toggle_widget(self, widget, var, widget_key):
         if var.get():
-            widget.grid() 
+            widget.grid() # grid() przywraca widget z zapamiętanymi opcjami
         else:
-            widget.grid_remove() 
+            widget.grid_remove() # grid_remove() ukrywa, ale pamięta opcje
 
     def open_me_website(self):
         webbrowser.open_new("https://www.mediaexpert.pl")
@@ -576,7 +592,7 @@ class AsystentApp(ctk.CTk):
             item = self.tree.identify_row(event.y)
             if item:
                 self.tree.selection_set(item)
-                self.context_menu.post(event.x_root, event.y_root)
+                self.context_menu.tk_popup(event.x_root, event.y_root) # Poprawione dla macOS
         except: pass
 
     def open_file_default(self):
@@ -592,11 +608,18 @@ class AsystentApp(ctk.CTk):
         if sel:
             path = self.tree.item(sel[0])['tags'][0]
             if not os.path.exists(path): return
-            try:
-                subprocess.Popen(['gimp', path])
-            except FileNotFoundError:
-                try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
-                except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP.")
+            
+            if platform.system() == "Darwin":
+                try:
+                    subprocess.Popen(['open', '-a', 'GIMP', path])
+                except Exception as e:
+                    messagebox.showerror("Błąd", f"Nie udało się uruchomić GIMP: {e}")
+            else:
+                try:
+                    subprocess.Popen(['gimp', path])
+                except FileNotFoundError:
+                    try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
+                    except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP.")
 
     def save_to_zip(self):
         selected = self.tree.selection()
@@ -615,7 +638,7 @@ class AsystentApp(ctk.CTk):
                         count += 1
             self.status_label.configure(text=f"Zapisano {count} plików do {os.path.basename(target_zip)}")
             messagebox.showinfo("Sukces", f"Utworzono archiwum ZIP:\n{target_zip}")
-        except Exception as e: 
+        except Exception as e:
             messagebox.showerror("Błąd", f"Nie udało się utworzyć ZIP: {e}")
 
     def open_path(self, path):
