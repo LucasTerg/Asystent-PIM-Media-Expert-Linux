@@ -1,17 +1,17 @@
-name: Build for Steam Deck (Arch Linux)
+name: Build AsystentMediaExpert
 
 on:
   push:
     tags:
       - 'v*' # Uruchamia się przy tagach np. v1.0.3
     branches: [ "main" ] # Uruchamia się też przy pushu na main (tworzy Artifact)
-  workflow_dispatch:
+  workflow_dispatch: # Pozwala ręcznie uruchomić workflow z poziomu GitHub UI
 
-permissions: 
+permissions:
   contents: write # Potrzebne do tworzenia Release
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -20,7 +20,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install System Dependencies (Arch)
+    - name: Install System Dependencies (Arch Linux)
       run: |
         pacman -Sy --noconfirm
         pacman -S --noconfirm base-devel python python-pip tk git \
@@ -50,20 +50,79 @@ jobs:
           --collect-all "pillow_heif" \
           main.py
 
-    # Artifact tworzony zawsze dla testów i brancha main
-    - name: Upload Artifact
+    - name: Upload Linux Artifact
+      if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
       uses: actions/upload-artifact@v4
       with:
         name: AsystentMediaExpert-Linux
         path: dist/AsystentMediaExpert
 
-    # Release tworzony TYLKO gdy pushujemy tag
-    - name: Release
+    - name: Create Linux Release Asset
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         files: dist/AsystentMediaExpert
-        # Opcjonalnie: automatyczne generowanie notatek
+        tag_name: ${{ github.ref }}
+        name: Release ${{ github.ref }}
         generate_release_notes: true
+        body_path: RELEASE_NOTES.md # Opcjonalnie: plik z opisem release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    runs-on: macos-latest # Użyj najnowszej wersji macOS
+    needs: build-linux # Zbuduj macOS po zbudowaniu Linuxa (opcjonalne, ale synchronizuje)
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x' # Użyj dowolnej dostępnej wersji Pythona 3.x
+
+    - name: Install Dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install tkinterdnd2 pyinstaller
+        # Instalacja zależności systemowych dla macOS (Homebrew)
+        # brew install cairo pkg-config gobject-introspection gtk+3
+        # Uwaga: macOS ma tkinter preinstalowany z Pythonem systemowym, ale dla PyGObject i Cairo mogą być potrzebne
+        # Zależności dla pillow-heif/avif na macOS mogą wymagać: brew install libheif libavif
+
+    - name: Build with PyInstaller
+      run: |
+        source venv/bin/activate
+        pyinstaller --noconfirm --onefile --windowed \
+          --name "AsystentMediaExpert" \
+          --add-data "realesrgan-ncnn-vulkan-mac:." \
+          --add-data "models:models" \
+          --hidden-import "PIL._tkinter_finder" \
+          --hidden-import "tkinterdnd2" \
+          --collect-all "tkinterdnd2" \
+          --collect-all "pillow_avif" \
+          --collect-all "pillow_heif" \
+          main.py
+
+    - name: Upload macOS Artifact
+      if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+      uses: actions/upload-artifact@v4
+      with:
+        name: AsystentMediaExpert-macOS
+        path: dist/AsystentMediaExpert
+
+    - name: Create macOS Release Asset
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/AsystentMediaExpert # To doda plik do istniejącego Release z Linuxa
+        append_to_release: true # Dodaj jako kolejny asset do istniejącego Release
+        tag_name: ${{ github.ref }}
+        name: Release ${{ github.ref }}
+        generate_release_notes: false # Notatki już są tworzone przez zadanie Linux
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
