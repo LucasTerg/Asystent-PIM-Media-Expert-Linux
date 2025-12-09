@@ -65,10 +65,43 @@ pyinstaller --noconfirm --onefile --windowed --name "AsystentMediaExpert" --coll
 ```
 Gotowy plik znajdziesz w folderze `dist/`.
 
+## Pobieranie i Uruchamianie Wersji Skompilowanych
+
+Najnowsze skompilowane wersje aplikacji dla systemów **Linux (Steam Deck)**, **macOS Intel** oraz **macOS Apple Silicon (ARM64)** są dostępne w sekcji [Releases](https://github.com/LucasTerg/Asystent-PIM-Media-Expert-Linux/releases) tego repozytorium.
+
+### Uruchamianie na Linux (Steam Deck)
+1.  Pobierz plik `AsystentMediaExpert-Linux` z najnowszego wydania (Release).
+2.  Nadaj plikowi uprawnienia wykonywania:
+    ```bash
+    chmod +x AsystentMediaExpert-Linux
+    ```
+3.  Uruchom aplikację:
+    ```bash
+    ./AsystentMediaExpert-Linux
+    ```
+
+### Uruchamianie na macOS
+1.  Pobierz odpowiedni plik dla Twojej architektury procesora z najnowszego wydania (Release):
+    *   **macOS Intel:** `AsystentMediaExpert-macOS-Intel`
+    *   **macOS Apple Silicon (M1/M2/M3):** `AsystentMediaExpert-macOS-arm64`
+2.  Zmień nazwę pobranego pliku na prostszą (np. `AsystentMediaExpert`).
+3.  Nadaj plikowi uprawnienia wykonywania:
+    ```bash
+    chmod +x AsystentMediaExpert
+    ```
+4.  **Usuń atrybut kwarantanny** (wymagane przez macOS dla aplikacji spoza App Store):
+    ```bash
+    xattr -d com.apple.quarantine AsystentMediaExpert
+    ```
+5.  Uruchom aplikację:
+    *   **Z terminala:** `./AsystentMediaExpert`
+    *   **Graficznie:** Dwukrotnie kliknij plik w Finderze.
+
 ## Użycie
-- Uruchom `AsystentMediaExpert` z folderu `dist/`.
-- Dodaj zdjęcia, przeciągając je do okna lub klikając "DODAJ OBRAZY".
+- Uruchom `AsystentMediaExpert` z folderu `dist/` lub pobrany plik bezpośrednio.
+- Dodaj zdjęcia, przeciągając je do okna lub klikając "DODAJ OBRAZY" (lub "Plik" -> "Dodaj folder").
 - Zaznacz pliki i korzystaj z funkcji.
+- Dostęp do opcji widoczności elementów interfejsu (np. ukrywania sekcji) znajdziesz w menu **"Widok"**.
 
 ## Licencja
 Ten projekt jest objęty licencją MIT. Szczegóły znajdziesz w pliku `LICENSE`.
@@ -77,7 +110,7 @@ Ten projekt jest objęty licencją MIT. Szczegóły znajdziesz w pliku `LICENSE`
 **Niniejszy program jest niezależnym projektem i nie jest oficjalnym produktem ani nie jest w żaden sposób powiązany z firmą Media Expert.** Został stworzony wyłącznie w celach edukacyjnych i użytkowych.
 
 ## Użyte technologie i licencje
-Ten projekt jest udostępniany na licencji **MIT**. Wykorzystuje on jednak zewnętrzne biblioteki i narzędzia, które podlegają własnym licencjom:
+Ten projekt jest udostępniany na licencji **MIT**. Wykorzystuje on jednak zewnętrzne biblioteki i narzędzia, które podlegają własnym licencom:
 
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** - MIT License
 - **[Pillow (PIL)](https://python-pillow.org/)** - HPND License
