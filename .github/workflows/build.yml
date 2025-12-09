@@ -41,13 +41,13 @@ jobs:
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
           --name "AsystentMediaExpert-Linux" \
-          --add-data "realesrgan-ncnn-vulkan:." \
-          --add-data "models:models" \
-          --hidden-import "PIL._tkinter_finder" \
-          --hidden-import "tkinterdnd2" \
-          --collect-all "tkinterdnd2" \
-          --collect-all "pillow_avif" \
-          --collect-all "pillow_heif" \
+          --add-data "realesrgan-ncnn-vulkan:."
+          --add-data "models:models"
+          --hidden-import "PIL._tkinter_finder"
+          --hidden-import "tkinterdnd2"
+          --collect-all "tkinterdnd2"
+          --collect-all "pillow_avif"
+          --collect-all "pillow_heif"
           main.py
 
     - name: Upload Linux Artifact
@@ -56,8 +56,8 @@ jobs:
         name: AsystentMediaExpert-Linux
         path: dist/AsystentMediaExpert-Linux
 
-  build-macos:
-    runs-on: macos-latest
+  build-macos-arm64:
+    runs-on: macos-latest # M1/M2/M3 (ARM64)
 
     steps:
     - name: Checkout code
@@ -81,26 +81,67 @@ jobs:
       run: |
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
-          --name "AsystentMediaExpert-macOS" \
-          --add-data "realesrgan-ncnn-vulkan-mac:." \
-          --add-data "models:models" \
-          --hidden-import "PIL._tkinter_finder" \
-          --hidden-import "tkinterdnd2" \
-          --collect-all "tkinterdnd2" \
-          --collect-all "pillow_avif" \
-          --collect-all "pillow_heif" \
+          --name "AsystentMediaExpert-macOS-arm64" \
+          --add-data "realesrgan-ncnn-vulkan-mac:."
+          --add-data "models:models"
+          --hidden-import "PIL._tkinter_finder"
+          --hidden-import "tkinterdnd2"
+          --collect-all "tkinterdnd2"
+          --collect-all "pillow_avif"
+          --collect-all "pillow_heif"
           main.py
 
-    - name: Upload macOS Artifact
+    - name: Upload macOS ARM64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS
-        path: dist/AsystentMediaExpert-macOS
+        name: AsystentMediaExpert-macOS-arm64
+        path: dist/AsystentMediaExpert-macOS-arm64
+
+  build-macos-intel:
+    runs-on: macos-13 # Intel (x86_64)
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install tkinterdnd2 pyinstaller
+        brew install cairo pkg-config gobject-introspection gtk+3 libheif libavif
+
+    - name: Build with PyInstaller
+      run: |
+        source venv/bin/activate
+        pyinstaller --noconfirm --onefile --windowed \
+          --name "AsystentMediaExpert-macOS-Intel" \
+          --add-data "realesrgan-ncnn-vulkan-mac:."
+          --add-data "models:models"
+          --hidden-import "PIL._tkinter_finder"
+          --hidden-import "tkinterdnd2"
+          --collect-all "tkinterdnd2"
+          --collect-all "pillow_avif"
+          --collect-all "pillow_heif"
+          main.py
+
+    - name: Upload macOS Intel Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AsystentMediaExpert-macOS-Intel
+        path: dist/AsystentMediaExpert-macOS-Intel
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos] # Czekaj na oba buildy
+    needs: [build-linux, build-macos-arm64, build-macos-intel] # Czekaj na 3 buildy
 
     steps:
     - name: Download Linux Artifact
@@ -109,10 +150,16 @@ jobs:
         name: AsystentMediaExpert-Linux
         path: dist
 
-    - name: Download macOS Artifact
+    - name: Download macOS ARM64 Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS
+        name: AsystentMediaExpert-macOS-arm64
+        path: dist
+
+    - name: Download macOS Intel Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: AsystentMediaExpert-macOS-Intel
         path: dist
 
     - name: Display structure of downloaded files
@@ -123,7 +170,8 @@ jobs:
       with:
         files: |
           dist/AsystentMediaExpert-Linux
-          dist/AsystentMediaExpert-macOS
+          dist/AsystentMediaExpert-macOS-arm64
+          dist/AsystentMediaExpert-macOS-Intel
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
