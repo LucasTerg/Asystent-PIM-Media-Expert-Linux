@@ -14,6 +14,7 @@ import shutil
 import shlex 
 import io
 import zipfile
+import webbrowser
 
 # Wyłącz limit pikseli dla dużych obrazów z AI
 Image.MAX_IMAGE_PIXELS = None
@@ -30,17 +31,27 @@ class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.0")
+        self.title("Asystent PIM Media Expert v1.0.3") # Zmieniono na v1.0.3
         self.geometry("1350x900")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.file_list = []
-        self.overwrite_var = ctk.BooleanVar(value=True)
+        
+        # Zmieniono domyślną wartość na False
+        self.overwrite_var = ctk.BooleanVar(value=False) 
+        
         self.current_preview_path = None
         self.preview_image_ref = None 
+        
+        # Słownik do przechowywania zmiennych widoczności menu
+        self.view_vars = {} 
+        # Słownik do przechowywania referencji do widgetów w sidebarze
+        self.sidebar_widgets = {}
+        
         self.bind("<Button-1>", self.hide_context_menu)
         self.setup_ui()
+        self.create_main_menu()
 
     def set_icon(self):
         try:
@@ -84,70 +95,151 @@ class AsystentApp(ctk.CTk):
     def setup_ui(self):
         self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=ME_BLACK)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(25, weight=1)
+        self.sidebar.grid_rowconfigure(50, weight=1) # Spacer na dole
 
-        ctk.CTkLabel(self.sidebar, text="Asystent PIM", font=ctk.CTkFont(size=24, weight="bold"), text_color=ME_YELLOW).grid(row=0, column=0, padx=20, pady=(20, 10))
-        ctk.CTkLabel(self.sidebar, text="MEDIA EXPERT", font=ctk.CTkFont(size=12, weight="bold"), text_color="white").grid(row=1, column=0, padx=20, pady=(0, 20))
+        current_row = 0
+
+        self.lbl_app_title = ctk.CTkLabel(self.sidebar, text="Asystent PIM", font=ctk.CTkFont(size=24, weight="bold"), text_color=ME_YELLOW)
+        self.lbl_app_title.grid(row=current_row, column=0, padx=20, pady=(20, 10))
+        self.sidebar_widgets['lbl_app_title'] = {'widget': self.lbl_app_title, 'row': current_row}
+        current_row += 1
+        
+        self.lbl_me_expert = ctk.CTkLabel(self.sidebar, text="MEDIA EXPERT", font=ctk.CTkFont(size=12, weight="bold"), text_color="white")
+        self.lbl_me_expert.grid(row=current_row, column=0, padx=20, pady=(0, 20))
+        self.sidebar_widgets['lbl_me_expert'] = {'widget': self.lbl_me_expert, 'row': current_row}
+        current_row += 1
 
         btn_me = {"width": 200, "height": 40, "corner_radius": 4, "fg_color": ME_YELLOW, "text_color": ME_TEXT_ON_YELLOW, "hover_color": ME_YELLOW_HOVER, "font": ctk.CTkFont(weight="bold")}
         
-        ctk.CTkButton(self.sidebar, text="DODAJ OBRAZY", command=self.add_images, **btn_me).grid(row=2, column=0, padx=15, pady=8)
-        ctk.CTkButton(self.sidebar, text="WYCZYŚĆ LISTĘ", command=self.clear_list, fg_color="#444444", text_color="white", hover_color="#666666", width=200, height=35).grid(row=3, column=0, padx=15, pady=5)
-        ctk.CTkButton(self.sidebar, text="USUŃ ZAZNACZONY", command=self.remove_selected, fg_color="transparent", border_width=1, border_color="gray50", text_color="gray80", width=200).grid(row=4, column=0, padx=15, pady=5)
+        # BLOK 1: GŁÓWNE
+        self.lbl_b1 = ctk.CTkLabel(self.sidebar, text="GŁÓWNE", font=ctk.CTkFont(size=10, weight="bold"), text_color="gray50")
+        self.lbl_b1.grid(row=current_row, column=0, sticky="w", padx=20, pady=(5,0))
+        self.sidebar_widgets['lbl_b1'] = {'widget': self.lbl_b1, 'row': current_row}
+        current_row += 1
 
-        ctk.CTkLabel(self.sidebar, text="KOLEJNOŚĆ", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=6, column=0, padx=20, pady=(15,5))
-        move_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        move_frame.grid(row=7, column=0)
-        ctk.CTkButton(move_frame, text="▲", command=self.move_up, width=95, height=30, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
-        ctk.CTkButton(move_frame, text="▼", command=self.move_down, width=95, height=30, fg_color="#444444", hover_color="#666666").pack(side="left", padx=5)
+        self.btn_add = ctk.CTkButton(self.sidebar, text="DODAJ OBRAZY", command=self.add_images, **btn_me)
+        self.btn_add.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_add'] = {'widget': self.btn_add, 'row': current_row}
+        current_row += 1
+        
+        self.btn_clear = ctk.CTkButton(self.sidebar, text="WYCZYŚĆ LISTĘ", command=self.clear_list, fg_color="#444444", text_color="white", hover_color="#666666", width=200, height=35)
+        self.btn_clear.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_clear'] = {'widget': self.btn_clear, 'row': current_row}
+        current_row += 1
+        
+        self.btn_remove = ctk.CTkButton(self.sidebar, text="USUŃ ZAZNACZONY", command=self.remove_selected, fg_color="transparent", border_width=1, border_color="gray50", text_color="gray80", width=200)
+        self.btn_remove.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_remove'] = {'widget': self.btn_remove, 'row': current_row}
+        current_row += 1
 
-        ctk.CTkLabel(self.sidebar, text="USTAWIENIA JPG", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=8, column=0, padx=20, pady=(15,5))
-        self.lbl_quality = ctk.CTkLabel(self.sidebar, text="Jakość: 95", text_color="white")
-        self.lbl_quality.grid(row=9, column=0, padx=20, pady=0)
-        self.slider_quality = ctk.CTkSlider(self.sidebar, from_=10, to=100, number_of_steps=90, command=self.update_quality_label, width=180, progress_color=ME_YELLOW, button_color="white", button_hover_color=ME_YELLOW)
-        self.slider_quality.set(95)
-        self.slider_quality.grid(row=10, column=0, padx=20, pady=5)
+        self.frame_order = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.frame_order.grid(row=current_row, column=0, pady=5)
+        self.sidebar_widgets['frame_order'] = {'widget': self.frame_order, 'row': current_row}
+        self.lbl_order = ctk.CTkLabel(self.frame_order, text="KOLEJNOŚĆ", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray")
+        self.lbl_order.pack(side="top")
+        self.btn_up = ctk.CTkButton(self.frame_order, text="▲", command=self.move_up, width=95, height=30, fg_color="#444444", hover_color="#666666")
+        self.btn_up.pack(side="left", padx=5)
+        self.btn_down = ctk.CTkButton(self.frame_order, text="▼", command=self.move_down, width=95, height=30, fg_color="#444444", hover_color="#666666")
+        self.btn_down.pack(side="left", padx=5)
+        current_row += 1
+
+        # BLOK 2: USTAWIENIA
+        self.lbl_b2 = ctk.CTkLabel(self.sidebar, text="USTAWIENIA", font=ctk.CTkFont(size=10, weight="bold"), text_color="gray50")
+        self.lbl_b2.grid(row=current_row, column=0, sticky="w", padx=20, pady=(15,0))
+        self.sidebar_widgets['lbl_b2'] = {'widget': self.lbl_b2, 'row': current_row}
+        current_row += 1
+
+        self.frame_quality = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.frame_quality.grid(row=current_row, column=0, pady=5)
+        self.sidebar_widgets['frame_quality'] = {'widget': self.frame_quality, 'row': current_row}
+        self.lbl_quality = ctk.CTkLabel(self.frame_quality, text="Jakość: 100", text_color="white")
+        self.lbl_quality.pack()
+        self.slider_quality = ctk.CTkSlider(self.frame_quality, from_=10, to=100, number_of_steps=90, command=self.update_quality_label, width=180, progress_color=ME_YELLOW, button_color="white", button_hover_color=ME_YELLOW)
+        self.slider_quality.set(100) # Ustawiono na 100%
+        self.slider_quality.pack()
+        current_row += 1
 
         self.chk_overwrite = ctk.CTkCheckBox(self.sidebar, text="Nadpisz pliki", variable=self.overwrite_var, font=ctk.CTkFont(size=12), text_color="white", fg_color=ME_YELLOW, hover_color=ME_YELLOW_HOVER, checkmark_color="black")
-        self.chk_overwrite.grid(row=11, column=0, padx=25, pady=10, sticky="w")
+        self.chk_overwrite.grid(row=current_row, column=0, padx=25, pady=5, sticky="w")
+        self.sidebar_widgets['chk_overwrite'] = {'widget': self.chk_overwrite, 'row': current_row}
+        current_row += 1
 
-        ctk.CTkLabel(self.sidebar, text="OPERACJE", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").grid(row=12, column=0, padx=20, pady=(10,5))
+        # BLOK 3: KONWERSJA
+        self.lbl_b3 = ctk.CTkLabel(self.sidebar, text="KONWERSJA", font=ctk.CTkFont(size=10, weight="bold"), text_color="gray50")
+        self.lbl_b3.grid(row=current_row, column=0, sticky="w", padx=20, pady=(15,0))
+        self.sidebar_widgets['lbl_b3'] = {'widget': self.lbl_b3, 'row': current_row}
+        current_row += 1
 
-        ops = [
-            ("KONWERTUJ DO JPG", self.convert_to_jpg),
-            ("DODAJ BIAŁE TŁO", self.add_white_bg),
-            ("DODAJ RAMKĘ 5px", self.add_border_5px),
-            ("KADRUJ", self.auto_crop),
-            ("ZWIĘKSZ DO 500px", self.upscale_500),
-            ("DOPASUJ DO 3000x3600", self.downscale_custom),
-            ("KOMPRESUJ DO 3 MB", self.smart_compress_3mb)
-        ]
+        self.btn_jpg = ctk.CTkButton(self.sidebar, text="KONWERTUJ DO JPG", command=self.convert_to_jpg, **btn_me)
+        self.btn_jpg.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_jpg'] = {'widget': self.btn_jpg, 'row': current_row}
+        current_row += 1
+        
+        self.btn_webp = ctk.CTkButton(self.sidebar, text="KONWERTUJ DO WEBP", command=self.convert_to_webp, **btn_me)
+        self.btn_webp.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_webp'] = {'widget': self.btn_webp, 'row': current_row}
+        current_row += 1
+
+        # BLOK 4: EDYCJA I SKALOWANIE
+        self.lbl_b4 = ctk.CTkLabel(self.sidebar, text="EDYCJA I SKALOWANIE", font=ctk.CTkFont(size=10, weight="bold"), text_color="gray50")
+        self.lbl_b4.grid(row=current_row, column=0, sticky="w", padx=20, pady=(15,0))
+        self.sidebar_widgets['lbl_b4'] = {'widget': self.lbl_b4, 'row': current_row}
+        current_row += 1
+
+        self.btn_white_bg = ctk.CTkButton(self.sidebar, text="DODAJ BIAŁE TŁO", command=self.add_white_bg, **btn_me)
+        self.btn_white_bg.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_white_bg'] = {'widget': self.btn_white_bg, 'row': current_row}
+        current_row += 1
+
+        self.btn_border = ctk.CTkButton(self.sidebar, text="DODAJ RAMKĘ 5px", command=self.add_border_5px, **btn_me)
+        self.btn_border.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_border'] = {'widget': self.btn_border, 'row': current_row}
+        current_row += 1
+
+        self.btn_crop = ctk.CTkButton(self.sidebar, text="KADRUJ", command=self.auto_crop, **btn_me)
+        self.btn_crop.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_crop'] = {'widget': self.btn_crop, 'row': current_row}
+        current_row += 1
+
+        self.btn_upscale = ctk.CTkButton(self.sidebar, text="ZWIĘKSZ DO 500px", command=self.upscale_500, **btn_me)
+        self.btn_upscale.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_upscale'] = {'widget': self.btn_upscale, 'row': current_row}
+        current_row += 1
+
+        self.btn_downscale = ctk.CTkButton(self.sidebar, text="DOPASUJ DO 3000x3600", command=self.downscale_custom, **btn_me)
+        self.btn_downscale.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_downscale'] = {'widget': self.btn_downscale, 'row': current_row}
+        current_row += 1
+
+        self.btn_compress = ctk.CTkButton(self.sidebar, text="KOMPRESUJ DO 3 MB", command=self.smart_compress_3mb, **btn_me)
+        self.btn_compress.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_compress'] = {'widget': self.btn_compress, 'row': current_row}
+        current_row += 1
 
         has_ai = self.check_ai_tools()
         if has_ai:
-            ops.append(("AI SMART UPSCALE", self.ai_upscale_x4))
+            self.frame_ai = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            self.frame_ai.grid(row=current_row, column=0, pady=(5,0))
+            self.sidebar_widgets['frame_ai_settings'] = {'widget': self.frame_ai, 'row': current_row} # Dla ukrywania ustawień AI
+            ctk.CTkLabel(self.frame_ai, text="Max Px:", text_color="gray", font=ctk.CTkFont(size=11)).pack(side="left", padx=2)
+            self.entry_ai_target = ctk.CTkEntry(self.frame_ai, width=60, height=25, border_color="#6A0DAD", justify="center")
+            self.entry_ai_target.insert(0, "3000")
+            self.entry_ai_target.pack(side="left", padx=2)
+            current_row += 1
+            
+            btn_ai = btn_me.copy()
+            btn_ai.update({"fg_color": "#6A0DAD", "hover_color": "#800080"})
+            self.btn_ai = ctk.CTkButton(self.sidebar, text="AI SMART UPSCALE", command=self.ai_upscale_x4, **btn_ai)
+            self.btn_ai.grid(row=current_row, column=0, padx=15, pady=5)
+            self.sidebar_widgets['btn_ai'] = {'widget': self.btn_ai, 'row': current_row}
+            current_row += 1
+        else:
+            self.lbl_no_ai = ctk.CTkLabel(self.sidebar, text="(Brak pluginu AI)", font=ctk.CTkFont(size=10), text_color="gray")
+            self.lbl_no_ai.grid(row=current_row, column=0)
+            self.sidebar_widgets['lbl_no_ai'] = {'widget': self.lbl_no_ai, 'row': current_row}
+            current_row += 1
 
-        r = 13
-        for text, cmd in ops:
-            if text == "AI SMART UPSCALE":
-                 ai_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-                 ai_frame.grid(row=r, column=0, pady=(5,0))
-                 ctk.CTkLabel(ai_frame, text="Max Px:", text_color="gray", font=ctk.CTkFont(size=11)).pack(side="left", padx=2)
-                 self.entry_ai_target = ctk.CTkEntry(ai_frame, width=60, height=25, border_color="#6A0DAD", justify="center")
-                 self.entry_ai_target.insert(0, "3000")
-                 self.entry_ai_target.pack(side="left", padx=2)
-                 
-                 r += 1
-                 btn_ai = btn_me.copy()
-                 btn_ai.update({"fg_color": "#6A0DAD", "hover_color": "#800080"})
-                 ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_ai).grid(row=r, column=0, padx=15, pady=5)
-            else:
-                 ctk.CTkButton(self.sidebar, text=text, command=cmd, **btn_me).grid(row=r, column=0, padx=15, pady=5)
-            r += 1
-
-        if not has_ai:
-             ctk.CTkLabel(self.sidebar, text="(Brak pluginu AI)", font=ctk.CTkFont(size=10), text_color="gray").grid(row=r, column=0)
-
+        # MAIN AREA (Prawej strona)
         self.main_area = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
         self.main_area.grid_rowconfigure(2, weight=1)
@@ -174,7 +266,6 @@ class AsystentApp(ctk.CTk):
         self.list_frame.grid_columnconfigure(0, weight=1)
         self.list_frame.grid_rowconfigure(1, weight=1)
         
-        # Double-click w ramkę otwiera dodawanie
         self.list_frame.bind("<Double-Button-1>", lambda e: self.add_images())
 
         ctk.CTkLabel(self.list_frame, text="Lista plików", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w", padx=0, pady=5)
@@ -182,7 +273,6 @@ class AsystentApp(ctk.CTk):
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("Treeview", background="#2b2b2b", foreground="white", rowheight=30, fieldbackground="#2b2b2b", borderwidth=0, font=("Segoe UI", 10))
-        # Przywrócono żółte tło zaznaczenia z czarnym tekstem
         style.map('Treeview', background=[('selected', ME_YELLOW)], foreground=[('selected', 'black')])
         style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat", font=("Segoe UI", 10, "bold"))
         
@@ -208,7 +298,7 @@ class AsystentApp(ctk.CTk):
         self.tree.configure(yscrollcommand=scrollbar.set)
         
         self.tree.bind("<Button-1>", self.on_tree_click)
-        self.tree.bind("<Double-Button-1>", self.on_tree_double_click) # Podwójne kliknięcie w wiersz
+        self.tree.bind("<Double-Button-1>", self.on_tree_double_click)
         self.tree.bind("<Button-3>", self.show_context_menu)
 
         self.context_menu = Menu(self.main_area, tearoff=0, bg="#2D2D2D", fg="white", activebackground=ME_YELLOW, activeforeground="black")
@@ -219,9 +309,9 @@ class AsystentApp(ctk.CTk):
         self.context_menu.add_command(label="Zapisz zaznaczone do ZIP", command=self.save_to_zip)
         self.context_menu.add_command(label="Usuń z listy", command=self.remove_selected)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="Zakończ", command=self.quit) # Dodano opcję Zakończ
+        self.context_menu.add_command(label="Zakończ", command=self.quit)
 
-        self.preview_frame = ctk.CTkFrame(self.main_area, corner_radius=10, fg_color="#222222")
+        self.preview_frame = ctk.CTkFrame(self.main_area, corner_radius=0, fg_color="#222222")
         self.preview_frame.grid(row=2, column=1, sticky="nsew", padx=15, pady=15)
         self.preview_frame.grid_propagate(False)
         self.preview_frame.grid_columnconfigure(0, weight=1)
@@ -232,13 +322,103 @@ class AsystentApp(ctk.CTk):
         self.lbl_preview = tk.Label(self.preview_frame, text="Wybierz plik", fg="gray", bg="#222222", font=("Segoe UI", 10))
         self.lbl_preview.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         
-        # Kliknięcie w podgląd otwiera plik
         self.lbl_preview.bind("<Button-1>", self.open_preview_file)
         
         self.preview_frame.bind("<Configure>", self.resize_preview_event)
 
         self.status_label = ctk.CTkLabel(self.main_area, text="Gotowy", anchor="w", text_color="gray")
         self.status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5,10), padx=20)
+
+    def create_main_menu(self):
+        menubar = Menu(self)
+        self.config(menu=menubar)
+        
+        # Menu Plik
+        file_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Plik", menu=file_menu)
+        file_menu.add_command(label="Dodaj obrazy", command=self.add_images)
+        file_menu.add_command(label="Dodaj folder", command=self.add_folder) # Nowa opcja
+        file_menu.add_separator()
+        file_menu.add_command(label="Zakończ", command=self.quit)
+
+        # Menu Widok
+        view_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Widok", menu=view_menu)
+        
+        # Helper do dodawania checkboxów w menu
+        def add_toggle(label, widget_key, default=True):
+            var = tk.BooleanVar(value=default)
+            self.view_vars[label] = var
+            widget_data = self.sidebar_widgets.get(widget_key)
+            if widget_data:
+                widget = widget_data['widget']
+                # command wywołuje toggle_widget z konkretnymi argumentami
+                view_menu.add_checkbutton(label=label, variable=var, 
+                                          command=lambda w=widget, v=var, k=widget_key: self.toggle_widget(w, v, k))
+                # Initial state based on default value
+                if not default:
+                    widget.grid_remove()
+            else:
+                view_menu.add_checkbutton(label=label, variable=var, state='disabled',
+                                          command=lambda: print(f"Widget {widget_key} not found"))
+            return var
+
+        # Nagłówek Aplikacji
+        add_toggle("Nagłówek aplikacji", 'lbl_app_title')
+        add_toggle("Media Expert Logo", 'lbl_me_expert', default=False) # Domyślnie ukryte
+
+        # BLOK 1: GŁÓWNE
+        view_menu.add_command(label="--- Główne ---", state='disabled')
+        add_toggle("Etykieta sekcji", 'lbl_b1')
+        add_toggle("Dodaj obrazy", 'btn_add')
+        add_toggle("Wyczyść listę", 'btn_clear')
+        add_toggle("Usuń zaznaczenie", 'btn_remove')
+        add_toggle("Kolejność (przyciski)", 'frame_order') 
+        
+        # BLOK 2: USTAWIENIA
+        view_menu.add_separator()
+        view_menu.add_command(label="--- Ustawienia ---", state='disabled')
+        add_toggle("Etykieta sekcji", 'lbl_b2')
+        add_toggle("Jakość JPG (slider)", 'frame_quality')
+        add_toggle("Nadpisz pliki (checkbox)", 'chk_overwrite')
+        
+        # BLOK 3: KONWERSJA
+        view_menu.add_separator()
+        view_menu.add_command(label="--- Konwersja ---", state='disabled')
+        add_toggle("Etykieta sekcji", 'lbl_b3')
+        add_toggle("Konwertuj do JPG", 'btn_jpg')
+        add_toggle("Konwertuj do WebP", 'btn_webp', default=False) # Domyślnie ukryte
+        
+        # BLOK 4: EDYCJA I SKALOWANIE
+        view_menu.add_separator()
+        view_menu.add_command(label="--- Edycja i Skalowanie ---", state='disabled')
+        add_toggle("Etykieta sekcji", 'lbl_b4')
+        add_toggle("Dodaj białe tło", 'btn_white_bg')
+        add_toggle("Dodaj ramkę", 'btn_border')
+        add_toggle("Kadruj", 'btn_crop')
+        add_toggle("Zwiększ do 500px", 'btn_upscale')
+        add_toggle("Dopasuj 3000x3600", 'btn_downscale')
+        add_toggle("Kompresuj do 3 MB", 'btn_compress')
+        
+        if hasattr(self, 'btn_ai'):
+            view_menu.add_separator()
+            add_toggle("AI Smart Upscale", 'btn_ai')
+            add_toggle("AI Settings", 'frame_ai_settings')
+
+        # Menu About
+        about_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="About", menu=about_menu)
+        about_menu.add_command(label="Asystent PIM", state='disabled')
+        about_menu.add_command(label="Media Expert", command=self.open_me_website)
+
+    def toggle_widget(self, widget, var, widget_key):
+        if var.get():
+            widget.grid() 
+        else:
+            widget.grid_remove() 
+
+    def open_me_website(self):
+        webbrowser.open_new("https://www.mediaexpert.pl")
 
     def open_preview_file(self, event):
         if self.current_preview_path and os.path.exists(self.current_preview_path):
@@ -497,6 +677,26 @@ class AsystentApp(ctk.CTk):
         files = filedialog.askopenfilenames(filetypes=types)
         if files: self.process_added_files(files)
 
+    def add_folder(self):
+        folder = filedialog.askdirectory()
+        if not folder: return
+        
+        # Rozszerzenia obsługiwane (małymi literami)
+        exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic', '.avif', '.tif', '.tiff')
+        
+        files = []
+        try:
+            for f in os.listdir(folder):
+                if f.lower().endswith(exts):
+                    full_path = os.path.join(folder, f)
+                    if os.path.isfile(full_path):
+                        files.append(full_path)
+        except Exception as e:
+            print(f"Error reading folder: {e}")
+            
+        if files:
+            self.process_added_files(files)
+
     def process_added_files(self, files):
         for path in files:
             exists = False
@@ -569,19 +769,27 @@ class AsystentApp(ctk.CTk):
                                 os.rename(path, archived_original_path)
                                 n, e = os.path.splitext(path)
                                 suffix = name.lower().replace(' ','')
-                                if name == "JPG" or name == "Kompresja3MB":
-                                    save_path = f"{n}.jpg"
+                                if name == "JPG" or name == "Kompresja3MB" or name == "WEBP":
+                                    # Dla formatów zmieniających rozszerzenie
+                                    pass 
                                 else:
                                     save_path = f"{n}_{suffix}{e}"
                             except Exception as e:
                                 continue
                         
+                        # Obsługa formatów i zapisu
                         if name == "JPG":
                             if res.mode != 'RGB': res = res.convert('RGB')
                             root, _ = os.path.splitext(save_path)
                             save_path = root + ".jpg"
                             res.save(save_path, quality=quality_val, optimize=True, progressive=True)
                         
+                        elif name == "WEBP":
+                            root, _ = os.path.splitext(save_path)
+                            save_path = root + ".webp"
+                            # WebP wspiera przezroczystość, nie konwertujemy do RGB
+                            res.save(save_path, quality=quality_val, optimize=True)
+
                         elif name == "Kompresja3MB":
                             if res.mode != 'RGB': res = res.convert('RGB')
                             root, _ = os.path.splitext(save_path)
@@ -589,6 +797,7 @@ class AsystentApp(ctk.CTk):
                             self.save_compressed_limit(res, save_path, 3 * 1024 * 1024)
                         
                         else:
+                            # Inne operacje (zachowaj format lub jpg jeśli wymuszone)
                             if save_path.lower().endswith(('.jpg', '.jpeg')):
                                 if res.mode != 'RGB': res = res.convert('RGB')
                                 res.save(save_path, quality=quality_val, optimize=True, progressive=True)
@@ -761,6 +970,7 @@ class AsystentApp(ctk.CTk):
         self.status_label.configure(text=f"Zakończono Smart AI: {processed_count} plików.")
 
     def convert_to_jpg(self): self.process_images("JPG", lambda i: i.convert("RGB"))
+    def convert_to_webp(self): self.process_images("WEBP", lambda i: i)
     def smart_compress_3mb(self): self.process_images("Kompresja3MB", lambda i: i)
     def add_white_bg(self):
         def f(i):
@@ -792,17 +1002,13 @@ class AsystentApp(ctk.CTk):
         def f(i):
             w, h = i.size
             if w < 500 or h < 500:
-                # Nowa logika: Dopełnienie do 500px białym tłem, bez skalowania
                 new_w = max(w, 500)
                 new_h = max(h, 500)
-                
-                # Konwersja na odpowiedni tryb dla tła
                 if i.mode == 'RGBA':
-                    bg = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255)) # Białe tło
-                    # Wklejamy na środek
+                    bg = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255))
                     x = (new_w - w) // 2
                     y = (new_h - h) // 2
-                    bg.paste(i, (x, y), i) # Używamy i jako maski dla przezroczystości
+                    bg.paste(i, (x, y), i)
                     return bg
                 else:
                     bg = Image.new("RGB", (new_w, new_h), "white")

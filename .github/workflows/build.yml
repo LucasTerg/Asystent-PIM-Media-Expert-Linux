@@ -1,0 +1,58 @@
+name: Build for Steam Deck (Arch Linux)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install System Dependencies (Arch)
+      run: |
+        pacman -Sy --noconfirm
+        # Instalujemy narzędzia deweloperskie i biblioteki graficzne
+        pacman -S --noconfirm base-devel python python-pip tk git \
+          libjpeg-turbo zlib libtiff libwebp openjpeg2 \
+          libimagequant libraqm libxcb
+
+    - name: Install Python Dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip
+        
+        # Instalacja zależności z pliku (w tym pillow-avif-plugin i pillow-heif)
+        pip install -r requirements.txt
+        
+        # Dodatkowo upewniamy się, że mamy tkinterdnd2 i pyinstaller
+        pip install tkinterdnd2 pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        source venv/bin/activate
+        pyinstaller --noconfirm --onefile --windowed \
+          --name "AsystentMediaExpert" \
+          --add-data "realesrgan-ncnn-vulkan:." \
+          --add-data "models:models" \
+          --hidden-import "PIL._tkinter_finder" \
+          --hidden-import "tkinterdnd2" \
+          --collect-all "tkinterdnd2" \
+          --collect-all "pillow_avif" \
+          --collect-all "pillow_heif" \
+          main.py
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AsystentMediaExpert-Linux
+        path: dist/AsystentMediaExpert
