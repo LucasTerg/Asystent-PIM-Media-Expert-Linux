@@ -98,16 +98,7 @@ jobs:
         path: dist/AsystentMediaExpert-macOS-arm64
 
   build-macos-intel:
-    runs-on: macos-13 # Używamy macos-13, bo macos-15-intel jest w private beta lub wymaga specjalnego dostępu. 
-    # UWAGA: Skoro macos-13 jest retired, spróbujmy macos-14 (też ARM) lub zostawmy tylko ARM.
-    # Jednak dla Intela obecnie jedyną opcją publiczną jest macos-13 (który znika) lub self-hosted.
-    # Spróbujmy wymusić macos-latest (ARM) i liczyć na Rosettę u użytkownika, 
-    # ALBO zaryzykujmy macos-15 jeśli jest dostępny publicznie (może być błąd w logu o deprecated 13, ale 15-intel to nowość).
-    # Zgodnie z komunikatem GitHub: "use the macos-15-intel label". Sprawdźmy czy zadziała.
-    runs-on: macos-15 # Jeśli to ARM, to zduplikujemy. Jeśli Intel, to super.
-    # Wg dokumentacji: macos-15 is ARM64. macos-13 is Intel (deprecated).
-    # Spróbujmy `macos-13` jeszcze raz, bo błąd był w PyInstallerze, a nie w braku runnera (tylko warning).
-    # EDIT: Jednak użyjmy macos-13, bo błąd był w skrypcie.
+    runs-on: macos-15-intel # Poprawiono na dedykowany runner Intel
 
     steps:
     - name: Checkout code
