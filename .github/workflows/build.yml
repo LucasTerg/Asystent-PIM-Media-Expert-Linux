@@ -26,7 +26,7 @@ jobs:
         pacman -S --noconfirm base-devel python python-pip tk git \
           libjpeg-turbo zlib libtiff libwebp openjpeg2 \
           libimagequant libraqm libxcb \
-          cairo pkgconf gobject-introspection gtk3
+          cairo pkgconf gobject-introspection gtk3 zip
 
     - name: Install Python Dependencies
       run: |
@@ -67,7 +67,7 @@ jobs:
           --exclude-module kornia \
           --exclude-module timm \
           --exclude-module nvidia \
-          --add-binary "realesrgan-ncnn-vulkan:." \
+          --add-binary "realesrgan-ncnn-vulkan:. " \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
           --hidden-import "tkinterdnd2" \
@@ -80,7 +80,7 @@ jobs:
     - name: Upload Linux Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-Linux
+        name: AsystentMediaExpert-Linux-All
         path: |
           dist/AsystentMediaExpert-Linux
           dist/rmbg_tool
@@ -137,7 +137,7 @@ jobs:
           --exclude-module kornia \
           --exclude-module timm \
           --exclude-module nvidia \
-          --add-binary "realesrgan-ncnn-vulkan-mac:." \
+          --add-binary "realesrgan-ncnn-vulkan-mac:. " \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
           --hidden-import "tkinterdnd2" \
@@ -150,7 +150,7 @@ jobs:
     - name: Upload macOS ARM64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-arm64
+        name: AsystentMediaExpert-macOS-arm64-All
         path: |
           dist/AsystentMediaExpert-macOS-arm64
           dist/rmbg_tool
@@ -207,7 +207,7 @@ jobs:
           --exclude-module kornia \
           --exclude-module timm \
           --exclude-module nvidia \
-          --add-binary "realesrgan-ncnn-vulkan-mac:." \
+          --add-binary "realesrgan-ncnn-vulkan-mac:. " \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
           --hidden-import "tkinterdnd2" \
@@ -220,7 +220,7 @@ jobs:
     - name: Upload macOS Intel Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-Intel
+        name: AsystentMediaExpert-macOS-Intel-All
         path: |
           dist/AsystentMediaExpert-macOS-Intel
           dist/rmbg_tool
@@ -234,34 +234,57 @@ jobs:
     - name: Download Linux Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-Linux
+        name: AsystentMediaExpert-Linux-All
         path: dist/linux
 
     - name: Download macOS ARM64 Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-arm64
+        name: AsystentMediaExpert-macOS-arm64-All
         path: dist/macos-arm64
 
     - name: Download macOS Intel Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-Intel
+        name: AsystentMediaExpert-macOS-Intel-All
         path: dist/macos-intel
 
-    - name: Display structure of downloaded files
+    - name: Prepare Separate ZIPs
+      run: |
+        # Linux
+        cd dist/linux
+        chmod +x AsystentMediaExpert-Linux
+        zip -r AsystentMediaExpert-Linux.zip AsystentMediaExpert-Linux
+        zip -r rmbg_tool-Linux.zip rmbg_tool
+        cd ../..
+        
+        # macOS ARM64
+        cd dist/macos-arm64
+        chmod +x AsystentMediaExpert-macOS-arm64
+        zip -r AsystentMediaExpert-macOS-arm64.zip AsystentMediaExpert-macOS-arm64
+        zip -r rmbg_tool-macOS-arm64.zip rmbg_tool
+        cd ../..
+        
+        # macOS Intel
+        cd dist/macos-intel
+        chmod +x AsystentMediaExpert-macOS-Intel
+        zip -r AsystentMediaExpert-macOS-Intel.zip AsystentMediaExpert-macOS-Intel
+        zip -r rmbg_tool-macOS-Intel.zip rmbg_tool
+        cd ../..
+
+    - name: Display structure
       run: ls -R dist
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/linux/AsystentMediaExpert-Linux
-          dist/linux/rmbg_tool
-          dist/macos-arm64/AsystentMediaExpert-macOS-arm64
-          dist/macos-arm64/rmbg_tool
-          dist/macos-intel/AsystentMediaExpert-macOS-Intel
-          dist/macos-intel/rmbg_tool
+          dist/linux/AsystentMediaExpert-Linux.zip
+          dist/linux/rmbg_tool-Linux.zip
+          dist/macos-arm64/AsystentMediaExpert-macOS-arm64.zip
+          dist/macos-arm64/rmbg_tool-macOS-arm64.zip
+          dist/macos-intel/AsystentMediaExpert-macOS-Intel.zip
+          dist/macos-intel/rmbg_tool-macOS-Intel.zip
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

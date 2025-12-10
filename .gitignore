@@ -11,3 +11,4 @@ build/
 dist/
 *.spec
 git-switch.sh
+GEMINI_MEMORIES.md
