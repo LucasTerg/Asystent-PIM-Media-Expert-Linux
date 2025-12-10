@@ -19,6 +19,8 @@ import cv2
 import numpy as np
 from gradio_client import Client 
 import urllib.parse
+import requests
+import base64
 
 # Wyłącz limit pikseli dla dużych obrazów z AI
 Image.MAX_IMAGE_PIXELS = None
@@ -76,7 +78,7 @@ class InpaintingEditor(ctk.CTkToplevel):
     def __init__(self, parent, image_path, callback):
         super().__init__(parent)
         self.title("Edytor Inpainting - Zamaluj obiekt")
-        self.geometry("1200x800")
+        self.geometry("1200x850")
         self.image_path = image_path
         self.callback = callback
         
@@ -106,7 +108,16 @@ class InpaintingEditor(ctk.CTkToplevel):
         self.slider_brush.set(20)
         self.slider_brush.pack(side="left", padx=5)
 
-        self.btn_process = ctk.CTkButton(self.toolbar, text="WYKONAJ (AUTO)", command=self.process, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
+        # Konfiguracja API
+        self.frame_api = ctk.CTkFrame(self.toolbar, fg_color="transparent")
+        self.frame_api.pack(side="left", padx=20)
+        
+        ctk.CTkLabel(self.frame_api, text="API URL:").pack(side="left", padx=5)
+        self.entry_api_url = ctk.CTkEntry(self.frame_api, width=180)
+        self.entry_api_url.insert(0, "http://127.0.0.1:7860")
+        self.entry_api_url.pack(side="left", padx=5)
+
+        self.btn_process = ctk.CTkButton(self.toolbar, text="WYKONAJ (Lokalne AI)", command=self.process, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
         self.btn_process.pack(side="right", padx=10)
         
         self.lbl_status = ctk.CTkLabel(self.toolbar, text="", text_color="gray")
@@ -151,41 +162,60 @@ class InpaintingEditor(ctk.CTkToplevel):
     def reset_last_point(self, event):
         self.last_x, self.last_y = None, None
 
+    def image_to_base64(self, img):
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
     def process(self):
         self.btn_process.configure(state="disabled", text="Przetwarzanie...")
-        self.lbl_status.configure(text="Próba połączenia z AI (Chmura)...")
+        self.lbl_status.configure(text="Łączenie z lokalnym SD...")
         self.update_idletasks()
         
-        temp_mask_path = None
+        api_url = self.entry_api_url.get().strip()
         
+        # 1. Próba: Lokalne API Stable Diffusion
         try:
-            temp_mask_path = os.path.join(os.path.dirname(self.image_path), "temp_mask.png")
-            self.mask_image.save(temp_mask_path)
-
-            client = Client("multimodalart/stable-diffusion-inpainting") # Popularny, oficjalny model SD Inpainting
+            # Przygotuj payload
+            b64_image = self.image_to_base64(self.original_image)
+            b64_mask = self.image_to_base64(self.mask_image)
             
-            result_path = client.predict(
-                self.image_path, 
-                temp_mask_path, 
-                # Tutaj moglibyśmy dodać prompt, ale domyślny powinien zadziałać
-                "background", # Wymagany, jeśli model to SD
-                api_name="/predict"
-            )
+            payload = {
+                "init_images": [b64_image],
+                "mask": b64_mask,
+                "prompt": "background, clean, empty, scenery, high quality, realistic",
+                "negative_prompt": "low quality, artifacts, watermark, text, object, bad anatomy, person, man, woman",
+                "steps": 30,
+                "cfg_scale": 7,
+                "width": self.original_image.width,
+                "height": self.original_image.height,
+                "sampler_name": "Euler a",
+                "inpainting_fill": 0, # 0=Fill (lepsze do usuwania - zamazuje obiekt kolorami otoczenia)
+                "denoising_strength": 0.9,
+                "resize_mode": 0
+            }
 
-            if result_path and os.path.exists(result_path):
-                result_pil = Image.open(result_path)
+            # Zwiększony timeout dla CPU (3600s = 60 minut)
+            response = requests.post(f"{api_url}/sdapi/v1/img2img", json=payload, timeout=3600)
+            
+            if response.status_code == 200:
+                r = response.json()
+                result_b64 = r['images'][0]
+                result_data = base64.b64decode(result_b64)
+                result_pil = Image.open(io.BytesIO(result_data))
+                
                 self.callback(result_pil, self.image_path)
-                self.cleanup(temp_mask_path)
                 self.destroy()
-                return # Zakończ po sukcesie chmury
+                return
+            else:
+                raise Exception(f"API Error {response.status_code}: {response.text[:200]}")
 
         except Exception as e:
-            print(f"Cloud AI failed: {e}")
-            self.lbl_status.configure(text="Błąd chmury. Przełączanie na tryb offline (OpenCV)...")
+            print(f"Local API failed: {e}")
+            self.lbl_status.configure(text="Błąd lokalnego API. Przełączanie na tryb offline (OpenCV)...")
             self.update_idletasks()
-            # Kontynuuj do sekcji offline
 
-        # Fallback: OpenCV (Offline)
+        # 2. Fallback: OpenCV (Offline)
         try:
             open_cv_image = np.array(self.original_image) 
             open_cv_image = open_cv_image[:, :, ::-1].copy()
@@ -197,29 +227,229 @@ class InpaintingEditor(ctk.CTkToplevel):
             result_pil = Image.fromarray(inpainted_rgb)
 
             self.callback(result_pil, self.image_path)
-            self.cleanup(temp_mask_path)
             
-            messagebox.showinfo("Inpainting (Offline)", "Inpainting zakończony w trybie offline (OpenCV) z powodu błędu AI w chmurze lub jego braku. Wyniki mogą być mniej precyzyjne.")
+            messagebox.showinfo("Inpainting (Offline)", "Inpainting wykonany przez OpenCV (tryb awaryjny).\nNie udało się połączyć z lokalnym Stable Diffusion.\n\nUpewnij się, że uruchomiłeś A1111 z flagą --api.")
             self.destroy()
 
         except Exception as e:
             self.lbl_status.configure(text="Błąd krytyczny!")
-            self.btn_process.configure(state="normal", text="WYKONAJ (AUTO)")
-            error_msg = f"Nie udało się przetworzyć obrazu (nawet offline).\n\nSzczegóły:\n{str(e)}"
+            self.btn_process.configure(state="normal", text="WYKONAJ (Lokalne AI)")
+            error_msg = f"Nie udało się przetworzyć obrazu.\n\nSzczegóły:\n{str(e)}"
             ErrorDialog(self, "Błąd Inpaintingu", error_msg)
-            self.cleanup(temp_mask_path)
 
-    def cleanup(self, path):
-        try: 
-            if path and os.path.exists(path): os.remove(path)
-        except: pass
 
+class RmbgEditor(ctk.CTkToplevel):
+    def __init__(self, parent, image_path, callback):
+        super().__init__(parent)
+        self.title("Usuwanie Tła (RMBG-2.0 Lokalnie)")
+        self.geometry("1000x600")
+        self.image_path = image_path
+        self.callback = callback
+        
+        # Load Image
+        self.original_image = Image.open(image_path).convert("RGB")
+        
+        # UI Setup
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        # Toolbar
+        self.toolbar = ctk.CTkFrame(self, height=50)
+        self.toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        
+        self.lbl_status = ctk.CTkLabel(self.toolbar, text="Gotowy do usunięcia tła.", text_color="gray")
+        self.lbl_status.pack(side="left", padx=10)
+
+        self.btn_process = ctk.CTkButton(self.toolbar, text="USUŃ TŁO (Cloud API)", command=self.process, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
+        self.btn_process.pack(side="right", padx=10)
+
+        # Preview Area
+        self.frame_preview = ctk.CTkFrame(self)
+        self.frame_preview.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        
+        # Image Display (Before/After)
+        self.canvas = tk.Canvas(self.frame_preview, bg="#2b2b2b", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+
+        self.display_image(self.original_image)
+
+    def display_image(self, img, comparison_img=None):
+        self.canvas.delete("all")
+        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if w < 100: w = 800
+        if h < 100: h = 500
+        
+        # Resize logic
+        img_ratio = img.width / img.height
+        canvas_ratio = w / h
+        
+        target_w, target_h = w, h
+        if not comparison_img:
+            # Single image centered
+            if img_ratio > canvas_ratio:
+                target_w = w
+                target_h = int(w / img_ratio)
+            else:
+                target_h = h
+                target_w = int(h * img_ratio)
+            
+            resized = img.resize((target_w, target_h), Image.LANCZOS)
+            self.tk_img = ImageTk.PhotoImage(resized)
+            self.canvas.create_image(w//2, h//2, image=self.tk_img, anchor="center")
+        else:
+            # Side by side
+            half_w = w // 2
+            
+            # Left (Original)
+            scale_factor = min(half_w / img.width, h / img.height)
+            tw1 = int(img.width * scale_factor)
+            th1 = int(img.height * scale_factor)
+            res1 = img.resize((tw1, th1), Image.LANCZOS)
+            self.tk_img1 = ImageTk.PhotoImage(res1)
+            self.canvas.create_image(half_w//2, h//2, image=self.tk_img1, anchor="center")
+            self.canvas.create_text(half_w//2, h//2 + th1//2 + 15, text="Oryginał", fill="white")
+            
+            # Right (Result)
+            scale_factor2 = min(half_w / comparison_img.width, h / comparison_img.height)
+            tw2 = int(comparison_img.width * scale_factor2)
+            th2 = int(comparison_img.height * scale_factor2)
+            res2 = comparison_img.resize((tw2, th2), Image.LANCZOS)
+            self.tk_img2 = ImageTk.PhotoImage(res2)
+            
+            # Draw checkerboard pattern for transparency
+            self.canvas.create_rectangle(half_w, 0, w, h, fill="#333333", outline="")
+            
+            self.canvas.create_image(half_w + half_w//2, h//2, image=self.tk_img2, anchor="center")
+            self.canvas.create_text(half_w + half_w//2, h//2 + th2//2 + 15, text="RMBG-2.0", fill="white")
+
+    def process(self):
+        self.btn_process.configure(state="disabled", text="Przetwarzanie (Lokalnie)...")
+        self.lbl_status.configure(text="Uruchamianie lokalnego RMBG-2.0...")
+        self.update_idletasks()
+        
+        import threading
+        threading.Thread(target=self._run_local_rmbg).start()
+
+    def _run_local_rmbg(self):
+        try:
+            print("Uruchamianie RMBG-2.0...")
+            
+            import sys
+            import subprocess
+
+            # Definicja pliku wyjściowego na samym początku
+            temp_output = os.path.join(os.path.dirname(self.image_path), "temp_rmbg_result.png")
+            
+            # Logika wykrywania środowiska (Skompilowany vs Deweloperski)
+            if getattr(sys, 'frozen', False):
+                # JESTEŚMY SKOMPILOWANI (PyInstaller)
+                # Szukamy pliku wykonywalnego 'rmbg_tool' OBOK pliku Asystenta (nie w środku/tmp)
+                base_path = os.path.dirname(sys.executable)
+                
+                if platform.system() == "Windows":
+                    rmbg_exe = os.path.join(base_path, "rmbg_tool", "rmbg_tool.exe")
+                else:
+                    rmbg_exe = os.path.join(base_path, "rmbg_tool", "rmbg_tool")
+                
+                # Upewniamy się, że ma prawa wykonywania (Linux/macOS)
+                if os.path.exists(rmbg_exe) and platform.system() != "Windows":
+                    try: os.chmod(rmbg_exe, 0o755)
+                    except: pass
+
+                print(f"Ścieżka narzędzia (Frozen): {rmbg_exe}")
+                
+                if not os.path.exists(rmbg_exe):
+                     raise Exception(f"Nie znaleziono pliku rmbg_tool w: {base_path}\nUpewnij się, że plik rmbg_tool znajduje się w tym samym folderze co aplikacja.")
+
+                cmd = [rmbg_exe, self.image_path, temp_output]
+                
+            else:
+                # TRYB DEWELOPERSKI (Python)
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                venv_python = os.path.join(script_dir, ".venv_rmbg", "bin", "python")
+                script_path = os.path.join(script_dir, "local_rmbg.py")
+                
+                if not os.path.exists(venv_python):
+                    venv_python = sys.executable
+
+                print(f"Ścieżka skryptu (Dev): {script_path}")
+                cmd = [venv_python, script_path, self.image_path, temp_output]
+            
+            # Uruchomienie procesu
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if process.returncode == 0 and os.path.exists(temp_output):
+                print(f"Sukces lokalny: {temp_output}")
+                result_pil = Image.open(temp_output)
+                self.after(0, lambda: self.finish_success(result_pil))
+            else:
+                error_log = process.stderr if process.stderr else process.stdout
+                raise Exception(f"Błąd skryptu: {error_log}")
+
+        except Exception as e:
+            print(f"RMBG Local Error: {e}")
+            error_msg = str(e)
+            self.after(0, lambda: self.finish_error(error_msg))
+
+    def finish_success(self, result_pil):
+        self.lbl_status.configure(text="Sukces!")
+        self.display_image(self.original_image, result_pil)
+        
+        # Add Save/Apply button logic if needed, currently automatic close on 'Accept'?
+        # Let's change button to 'Zatwierdź'
+        self.btn_process.configure(text="ZATWIERDŹ I ZAPISZ", command=lambda: self.save_and_close(result_pil), state="normal", fg_color="green", hover_color="darkgreen")
+
+    def finish_error(self, error_msg):
+        self.lbl_status.configure(text=f"Błąd: {error_msg}")
+        self.btn_process.configure(state="normal", text="SPRÓBUJ PONOWNIE")
+        messagebox.showerror("Błąd API", f"Nie udało się usunąć tła.\n{error_msg}")
+
+    def save_and_close(self, result_pil):
+        self.callback(result_pil, self.image_path)
+        self.destroy()
+
+class DeleteDialog(ctk.CTkToplevel):
+    def __init__(self, parent, paths, callback):
+        super().__init__(parent)
+        self.title("Usuwanie plików")
+        self.geometry("400x300")
+        self.resizable(False, False)
+        
+        self.paths = paths
+        self.callback = callback
+        
+        count = len(paths)
+        msg = f"Wybrano {count} plików.\nCzy na pewno chcesz usunąć je z dysku?"
+        if count == 1:
+            msg = f"Plik: {os.path.basename(paths[0])}\nCzy na pewno chcesz usunąć go z dysku?"
+
+        ctk.CTkLabel(self, text="OSTRZEŻENIE", text_color="red", font=("Arial", 16, "bold")).pack(pady=(20, 5))
+        ctk.CTkLabel(self, text=msg, font=("Arial", 12), wraplength=350).pack(pady=10)
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=10, fill="x", padx=40)
+
+        ctk.CTkButton(btn_frame, text="PRZENIEŚ DO /tmp (Kosz)", command=self.move_to_tmp, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER).pack(fill="x", pady=5)
+        ctk.CTkButton(btn_frame, text="USUŃ TRWALE (Nieodwracalne)", command=self.delete_permanently, fg_color="#cc0000", hover_color="#aa0000").pack(fill="x", pady=5)
+        ctk.CTkButton(btn_frame, text="Anuluj", command=self.destroy, fg_color="gray").pack(fill="x", pady=5)
+
+        self.grab_set()
+
+    def move_to_tmp(self):
+        self.callback("tmp", self.paths)
+        self.destroy()
+
+    def delete_permanently(self):
+        self.callback("perm", self.paths)
+        self.destroy()
 
 class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.5")
+        self.title("Asystent PIM Media Expert v1.0.7") 
         self.geometry("1350x895")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
@@ -411,12 +641,7 @@ class AsystentApp(ctk.CTk):
         self.sidebar_widgets['btn_compress'] = {'widget': self.btn_compress, 'row': current_row}
         current_row += 1
         
-        # INPAINTING
-        self.btn_inpainting = ctk.CTkButton(self.sidebar, text="INPAINTING (AUTO)", command=self.open_inpainting, **btn_me)
-        self.btn_inpainting.grid(row=current_row, column=0, padx=15, pady=5)
-        self.sidebar_widgets['btn_inpainting'] = {'widget': self.btn_inpainting, 'row': current_row}
-        self.btn_inpainting.grid_remove() # Domyślnie ukryj
-        current_row += 1
+
 
         has_ai = self.check_ai_tools()
         if has_ai:
@@ -514,10 +739,13 @@ class AsystentApp(ctk.CTk):
         self.context_menu.add_command(label="Edytuj obraz (domyślnie)", command=self.edit_default_image)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Inpainting (Usuń obiekt)", command=self.open_inpainting)
+        self.context_menu.add_command(label="Usuń tło (RMBG-2.0)", command=self.open_rembg)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zapisz zaznaczone do ZIP", command=self.save_to_zip)
         self.context_menu.add_command(label="Zapisz zaznaczone do 7z", command=self.save_to_7z)
         self.context_menu.add_command(label="Usuń z listy", command=self.remove_selected)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="❌ USUŃ Z DYSKU", command=self.delete_from_disk_dialog)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zakończ", command=self.quit)
 
@@ -601,12 +829,17 @@ class AsystentApp(ctk.CTk):
         add_toggle("Zwiększ do 500px", 'btn_upscale')
         add_toggle("Dopasuj 3000x3600", 'btn_downscale')
         add_toggle("Kompresuj do 3 MB", 'btn_compress')
-        add_toggle("Inpainting", 'btn_inpainting', default=False)
         
         if hasattr(self, 'btn_ai'): # Sprawdź czy AI jest dostępne, zanim dodasz do menu
             view_menu.add_separator()
             add_toggle("AI Smart Upscale", 'btn_ai')
             add_toggle("AI Settings", 'frame_ai_settings') # Ukrywa label i entry AI
+
+        # Menu Experimental
+        experimental_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Experimental", menu=experimental_menu)
+        experimental_menu.add_command(label="Inpainting (AI)", command=self.open_inpainting)
+        experimental_menu.add_command(label="Usuń tło (RMBG-2.0 Lokalnie)", command=self.open_rembg)
 
         # Menu About
         about_menu = Menu(menubar, tearoff=0)
@@ -816,10 +1049,83 @@ class AsystentApp(ctk.CTk):
         path = self.tree.item(sel[0])['tags'][0]
         if not os.path.exists(path): return
 
+        # Otwórz edytor inpaintingu
         editor = InpaintingEditor(self, path, self.after_inpainting)
-        editor.grab_set() 
+        editor.grab_set() # Zablokuj główne okno
+
+    def open_rembg(self):
+        sel = self.tree.selection()
+        if not sel: 
+            messagebox.showwarning("Info", "Wybierz obraz do edycji.")
+            return
+        
+        path = self.tree.item(sel[0])['tags'][0]
+        if not os.path.exists(path): return
+
+        # Otwórz edytor usuwania tła
+        editor = RmbgEditor(self, path, self.after_rembg)
+        editor.grab_set()
+
+    def after_rembg(self, result_image, original_path):
+        try:
+            original_dir = os.path.dirname(original_path)
+            filename = os.path.basename(original_path)
+            name_root, ext = os.path.splitext(filename)
+            
+            # Zawsze zapisz jako PNG (bo musi być przezroczystość)
+            save_path = os.path.join(original_dir, f"{name_root}_no_bg.png")
+
+            # Zapisz wynik
+            result_image.save(save_path, "PNG", optimize=True)
+            
+            self.status_label.configure(text=f"Tło usunięte: {os.path.basename(save_path)}")
+            
+            # Sprzątanie pliku tymczasowego
+            temp_output = os.path.join(original_dir, "temp_rmbg_result.png")
+            if os.path.exists(temp_output):
+                try: os.remove(temp_output)
+                except: pass
+
+            # ARCHIWIZACJA ORYGINAŁU
+            orig_archive_dir = os.path.join(original_dir, "_orig")
+            os.makedirs(orig_archive_dir, exist_ok=True)
+            archived_path = os.path.join(orig_archive_dir, filename)
+            
+            # Przenieś oryginał do _orig
+            if not os.path.exists(archived_path):
+                shutil.move(original_path, archived_path)
+            else:
+                import time
+                ts = int(time.time())
+                archived_path = os.path.join(orig_archive_dir, f"{name_root}_{ts}{ext}")
+                shutil.move(original_path, archived_path)
+            
+            # Odśwież listę (usuń oryginał, dodaj wynik)
+            # 1. Usuń oryginał z widoku
+            for item in self.tree.get_children():
+                if self.tree.item(item)['tags'][0] == original_path:
+                    self.tree.delete(item)
+                    break
+            
+            # 2. Usuń oryginał z listy plików
+            self.file_list = [p for p in self.file_list if p != original_path]
+
+            # 3. Dodaj wynik
+            self.file_list.append(save_path)
+            new_item_id = self.insert_tree_item(save_path)
+            if new_item_id:
+                self.tree.selection_set(new_item_id)
+                self.tree.see(new_item_id)
+            
+            self.update_indexes()
+            
+            # messagebox.showinfo("Sukces", f"Zapisano jako:\n{os.path.basename(save_path)}")
+
+        except Exception as e:
+            messagebox.showerror("Błąd zapisu", str(e))
 
     def after_inpainting(self, result_image, original_path):
+        # Callback po zakończeniu inpaintingu
         try:
             original_dir = os.path.dirname(original_path)
             filename = os.path.basename(original_path)
@@ -828,6 +1134,7 @@ class AsystentApp(ctk.CTk):
             overwrite = self.overwrite_var.get()
             
             if overwrite:
+                # Kopia oryginału do _orig
                 orig_archive_dir = os.path.join(original_dir, "_orig")
                 os.makedirs(orig_archive_dir, exist_ok=True)
                 archived_path = os.path.join(orig_archive_dir, filename)
@@ -839,10 +1146,12 @@ class AsystentApp(ctk.CTk):
             else:
                 save_path = os.path.join(original_dir, f"{name_root}_inpainting{ext}")
 
+            # Zapisz wynik
             result_image.save(save_path, quality=100, optimize=True)
             
             self.status_label.configure(text=f"Inpainting zakończony: {os.path.basename(save_path)}")
             
+            # Odśwież listę
             if not overwrite:
                 self.file_list.append(save_path)
                 self.insert_tree_item(save_path)
@@ -1002,7 +1311,7 @@ class AsystentApp(ctk.CTk):
         self.update_indexes()
 
     def insert_tree_item(self, path):
-        if not os.path.exists(path): return
+        if not os.path.exists(path): return None # Zwróć None, jeśli ścieżka nie istnieje
         try:
             size = os.path.getsize(path)
             name = os.path.basename(path)
@@ -1012,11 +1321,22 @@ class AsystentApp(ctk.CTk):
             except:
                 pass
             # Dodano "☑" jako wartość dla kolumny "chk"
-            self.tree.insert("", "end", values=("☑", "", name, self.format_bytes(size), res, "📂"), tags=[path])
-        except: pass
+            item_id = self.tree.insert("", "end", values=("☑", "", name, self.format_bytes(size), res, "📂"), tags=[path])
+            return item_id # Zwróć ID nowo dodanego elementu
+        except Exception as e:
+            print(f"Błąd podczas wstawiania elementu: {e}")
+            return None
 
     def remove_selected(self):
-        for item in self.tree.selection(): self.tree.delete(item)
+        selected_paths = []
+        for item in self.tree.selection():
+            path = self.tree.item(item)['tags'][0]
+            selected_paths.append(path)
+            self.tree.delete(item)
+        
+        # Usuń z self.file_list
+        self.file_list = [p for p in self.file_list if p not in selected_paths]
+
         self.update_indexes()
         self.lbl_preview.configure(image="", text="Wybierz plik")
 
@@ -1299,7 +1619,6 @@ class AsystentApp(ctk.CTk):
             if w < 500 or h < 500:
                 new_w = max(w, 500)
                 new_h = max(h, 500)
-                
                 if i.mode == 'RGBA':
                     bg = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255)) # Białe tło
                     # Wklejamy na środek
@@ -1323,6 +1642,49 @@ class AsystentApp(ctk.CTk):
                 return i
             return i
         self.process_images("Downscale", f)
+
+    def delete_from_disk_dialog(self):
+        sel = self.tree.selection()
+        if not sel: 
+            messagebox.showinfo("Info", "Zaznacz pliki do usunięcia.")
+            return
+        
+        paths = [self.tree.item(i)['tags'][0] for i in sel]
+        DeleteDialog(self, paths, self.perform_deletion)
+
+    def perform_deletion(self, mode, paths):
+        deleted_count = 0
+        
+        for path in paths:
+            try:
+                if not os.path.exists(path): continue
+                
+                if mode == "perm":
+                    os.remove(path)
+                elif mode == "tmp":
+                    dirname = os.path.dirname(path)
+                    tmp_dir = os.path.join(dirname, "tmp")
+                    os.makedirs(tmp_dir, exist_ok=True)
+                    fname = os.path.basename(path)
+                    dest = os.path.join(tmp_dir, fname)
+                    
+                    # Unikaj nadpisywania w tmp
+                    base, ext = os.path.splitext(fname)
+                    counter = 1
+                    while os.path.exists(dest):
+                        dest = os.path.join(tmp_dir, f"{base}_{counter}{ext}")
+                        counter += 1
+                        
+                    shutil.move(path, dest)
+                
+                deleted_count += 1
+            except Exception as e:
+                print(f"Błąd usuwania {path}: {e}")
+
+        # Odśwież listę (usuń zaznaczone z widoku)
+        if deleted_count > 0:
+            self.remove_selected()
+            # Opcjonalnie: messagebox.showinfo("Sukces", f"Usunięto/Przeniesiono {deleted_count} plików.")
 
 if __name__ == "__main__":
     app = AsystentApp()

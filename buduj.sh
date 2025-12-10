@@ -11,8 +11,27 @@ fi
 
 echo "Rozpoczynam budowanie w kontenerze: $CONTAINER_NAME..."
 
-# Uruchomienie budowania wewnątrz kontenera
-# Zakładamy, że skrypt jest uruchamiany z katalogu LinuxPort
+# 1. Budowanie narzędzia RMBG (jako FOLDER --onedir, aby uniknąć problemów z dekompresją w /tmp)
+echo "Budowanie narzędzia RMBG-2.0 (rmbg_tool)..."
+distrobox-enter -n "$CONTAINER_NAME" -- .venv_rmbg/bin/pyinstaller --noconfirm --onedir --console \
+    --name "rmbg_tool" \
+    --hidden-import=torch \
+    --hidden-import=torchvision \
+    --copy-metadata=torch \
+    --copy-metadata=tqdm \
+    --copy-metadata=regex \
+    --copy-metadata=requests \
+    --copy-metadata=packaging \
+    --copy-metadata=filelock \
+    --copy-metadata=numpy \
+    --collect-all transformers \
+    --collect-all torch \
+    --collect-all timm \
+    --collect-all kornia \
+    local_rmbg.py
+
+# 2. Budowanie głównej aplikacji (AsystentMediaExpert)
+echo "Budowanie Asystenta..."
 distrobox-enter -n "$CONTAINER_NAME" -- pyinstaller --noconfirm --onefile --windowed \
     --name "AsystentMediaExpert" \
     --collect-all customtkinter \
@@ -22,4 +41,7 @@ distrobox-enter -n "$CONTAINER_NAME" -- pyinstaller --noconfirm --onefile --wind
     --add-data "models/realesr-animevideov3-x2.param:models" \
     main.py
 
-echo "Zakończono. Plik wynikowy znajduje się w folderze dist/"
+echo "Zakończono. Pliki wynikowe znajdują się w folderze dist/"
+echo "Struktura:"
+echo "  dist/AsystentMediaExpert (plik)"
+echo "  dist/rmbg_tool/ (folder z narzędziem AI)"

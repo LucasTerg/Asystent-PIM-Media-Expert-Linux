@@ -47,3 +47,9 @@ wheel==0.45.1
 opencv-python
 numpy
 gradio_client
+requests
+torch
+torchvision
+transformers
+kornia
+timm
