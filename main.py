@@ -31,8 +31,8 @@ class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.4") # Zmieniono na v1.0.4
-        self.geometry("1350x900")
+        self.title("Asystent PIM Media Expert v1.0.5") # Zmieniono na v1.0.5
+        self.geometry("1350x895")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -45,7 +45,7 @@ class AsystentApp(ctk.CTk):
         self.preview_image_ref = None 
         
         # Słownik do przechowywania zmiennych widoczności menu
-        self.view_vars = {} 
+        self.view_vars = {}
         # Słownik do przechowywania referencji do widgetów w sidebarze
         self.sidebar_widgets = {}
         
@@ -328,8 +328,10 @@ class AsystentApp(ctk.CTk):
         self.context_menu.add_command(label="Otwórz plik", command=self.open_file_default)
         self.context_menu.add_command(label="Otwórz folder pliku", command=self.open_folder_context)
         self.context_menu.add_command(label="Edytuj w GIMP", command=self.open_in_gimp)
+        self.context_menu.add_command(label="Edytuj obraz (domyślnie)", command=self.edit_default_image) # NOWA OPCJA
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zapisz zaznaczone do ZIP", command=self.save_to_zip)
+        self.context_menu.add_command(label="Zapisz zaznaczone do 7z", command=self.save_to_7z) # NOWA OPCJA
         self.context_menu.add_command(label="Usuń z listy", command=self.remove_selected)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zakończ", command=self.quit)
@@ -368,7 +370,6 @@ class AsystentApp(ctk.CTk):
         view_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Widok", menu=view_menu)
         
-        # Helper do dodawania checkboxów w menu
         def add_toggle(label, widget_key, default=True):
             var = tk.BooleanVar(value=default)
             self.view_vars[label] = var
@@ -592,7 +593,7 @@ class AsystentApp(ctk.CTk):
             item = self.tree.identify_row(event.y)
             if item:
                 self.tree.selection_set(item)
-                self.context_menu.tk_popup(event.x_root, event.y_root) # Poprawione dla macOS
+                self.context_menu.tk_popup(event.x_root, event.y_root)
         except: pass
 
     def open_file_default(self):
@@ -613,13 +614,20 @@ class AsystentApp(ctk.CTk):
                 try:
                     subprocess.Popen(['open', '-a', 'GIMP', path])
                 except Exception as e:
-                    messagebox.showerror("Błąd", f"Nie udało się uruchomić GIMP: {e}")
+                    messagebox.showerror("Błąd", f"Nie udało się uruchomić GIMP na macOS: {e}\nSprawdź, czy GIMP jest zainstalowany i dostępny w folderze /Applications.")
             else:
                 try:
                     subprocess.Popen(['gimp', path])
                 except FileNotFoundError:
                     try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
-                    except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP.")
+                    except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP (Linux/Windows).")
+
+    def edit_default_image(self): # NOWA METODA
+        sel = self.tree.selection()
+        if sel:
+            path = self.tree.item(sel[0])['tags'][0]
+            if not os.path.exists(path): return
+            self.open_path(path) # Używa istniejącej metody do otwierania domyślnego
 
     def save_to_zip(self):
         selected = self.tree.selection()
@@ -640,6 +648,39 @@ class AsystentApp(ctk.CTk):
             messagebox.showinfo("Sukces", f"Utworzono archiwum ZIP:\n{target_zip}")
         except Exception as e:
             messagebox.showerror("Błąd", f"Nie udało się utworzyć ZIP: {e}")
+
+    def save_to_7z(self): # NOWA METODA
+        selected = self.tree.selection()
+        if not selected: return messagebox.showwarning("Info", "Wybierz pliki do spakowania.")
+        
+        # Sprawdź dostępność 7z w systemie
+        sevenz_path = shutil.which('7z')
+        if not sevenz_path:
+            messagebox.showerror("Błąd", "Nie znaleziono programu '7z' w systemie.\nUpewnij się, że '7z' (p7zip) jest zainstalowany i dostępny w PATH.")
+            return
+
+        target_7z = filedialog.asksaveasfilename(defaultextension=".7z", filetypes=[("Archiwum 7z", "*.7z")], title="Zapisz jako 7z")
+        if not target_7z: return
+
+        files_to_compress = [self.tree.item(item)['tags'][0] for item in selected if os.path.exists(self.tree.item(item)['tags'][0])]
+        
+        try:
+            # Komenda: 7z a -t7z archiwum.7z plik1 plik2 ...
+            cmd = [sevenz_path, 'a', '-t7z', target_7z] + files_to_compress
+            
+            # Uruchomienie procesu z ukrytą konsolą na Windows
+            startupinfo = None
+            if platform.system() == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            subprocess.run(cmd, check=True, startupinfo=startupinfo)
+            self.status_label.configure(text=f"Zapisano {len(files_to_compress)} plików do {os.path.basename(target_7z)}")
+            messagebox.showinfo("Sukces", f"Utworzono archiwum 7z:\n{target_7z}")
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Błąd 7z", f"Błąd podczas tworzenia archiwum 7z: {e}\n{e.stderr.decode()}")
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Nie udało się utworzyć 7z: {e}")
 
     def open_path(self, path):
         if not os.path.exists(path): return
