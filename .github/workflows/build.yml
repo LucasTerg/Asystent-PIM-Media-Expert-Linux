@@ -144,7 +144,7 @@ jobs:
           dist/rmbg_tool
 
   build-macos-intel:
-    runs-on: macos-13 # Poprawiono na dedykowany runner Intel
+    runs-on: macos-15-intel # Zaktualizowano runnera na nowszą wersję
 
     steps:
     - name: Checkout code
