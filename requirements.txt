@@ -44,3 +44,6 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 virtualenv==20.35.4
 wheel==0.45.1
+opencv-python
+numpy
+gradio_client

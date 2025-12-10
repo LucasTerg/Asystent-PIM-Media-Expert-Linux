@@ -15,6 +15,10 @@ import shlex
 import io
 import zipfile
 import webbrowser
+import cv2
+import numpy as np
+from gradio_client import Client 
+import urllib.parse
 
 # Wyłącz limit pikseli dla dużych obrazów z AI
 Image.MAX_IMAGE_PIXELS = None
@@ -27,26 +31,207 @@ ME_YELLOW_HOVER = "#E6B800"
 ME_BLACK = "#2D2D2D"
 ME_TEXT_ON_YELLOW = "black"
 
+class ErrorDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title, message):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("600x400")
+        self.message = message
+        
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self.textbox = ctk.CTkTextbox(self, wrap="word")
+        self.textbox.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
+        self.textbox.insert("0.0", message)
+        self.textbox.configure(state="disabled")
+
+        self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.btn_frame.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
+
+        self.btn_copy = ctk.CTkButton(self.btn_frame, text="Kopiuj do schowka", command=self.copy_to_clipboard, fg_color="#444444", hover_color="#666666")
+        self.btn_copy.pack(side="left", padx=5)
+
+        self.btn_send = ctk.CTkButton(self.btn_frame, text="Wyślij zgłoszenie", command=self.send_report, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
+        self.btn_send.pack(side="right", padx=5)
+
+        self.btn_close = ctk.CTkButton(self.btn_frame, text="Zamknij", command=self.destroy, fg_color="#444444", hover_color="#666666")
+        self.btn_close.pack(side="right", padx=5)
+
+    def copy_to_clipboard(self):
+        self.clipboard_clear()
+        self.clipboard_append(self.message)
+        self.update()
+
+    def send_report(self):
+        recipient = "dev@lmk.one"
+        subject = "Zgłoszenie błędu Asystent PIM"
+        body = f"Wystąpił błąd w aplikacji:\n\n{self.message}"
+        subject_encoded = urllib.parse.quote(subject)
+        body_encoded = urllib.parse.quote(body)
+        mailto_link = f"mailto:{recipient}?subject={subject_encoded}&body={body_encoded}"
+        webbrowser.open(mailto_link)
+
+class InpaintingEditor(ctk.CTkToplevel):
+    def __init__(self, parent, image_path, callback):
+        super().__init__(parent)
+        self.title("Edytor Inpainting - Zamaluj obiekt")
+        self.geometry("1200x800")
+        self.image_path = image_path
+        self.callback = callback
+        
+        try:
+            self.original_image = Image.open(image_path)
+            self.original_image = self.original_image.convert("RGB")
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Nie można otworzyć obrazu: {e}")
+            self.destroy()
+            return
+
+        self.mask_image = Image.new("L", self.original_image.size, 0)
+        self.mask_draw = ImageDraw.Draw(self.mask_image)
+
+        self.brush_size = 20
+        self.last_x, self.last_y = None, None
+
+        self.setup_ui()
+        self.update_canvas()
+
+    def setup_ui(self):
+        self.toolbar = ctk.CTkFrame(self, height=50)
+        self.toolbar.pack(side="top", fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(self.toolbar, text="Pędzel:").pack(side="left", padx=5)
+        self.slider_brush = ctk.CTkSlider(self.toolbar, from_=5, to=100, command=self.update_brush_size, width=100)
+        self.slider_brush.set(20)
+        self.slider_brush.pack(side="left", padx=5)
+
+        self.btn_process = ctk.CTkButton(self.toolbar, text="WYKONAJ (AUTO)", command=self.process, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
+        self.btn_process.pack(side="right", padx=10)
+        
+        self.lbl_status = ctk.CTkLabel(self.toolbar, text="", text_color="gray")
+        self.lbl_status.pack(side="right", padx=10)
+
+        self.frame_canvas = ctk.CTkFrame(self)
+        self.frame_canvas.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.canvas = tk.Canvas(self.frame_canvas, bg="#333333", highlightthickness=0)
+        
+        self.scroll_x = ctk.CTkScrollbar(self.frame_canvas, orientation="horizontal", command=self.canvas.xview)
+        self.scroll_y = ctk.CTkScrollbar(self.frame_canvas, orientation="vertical", command=self.canvas.yview)
+        
+        self.canvas.configure(xscrollcommand=self.scroll_x.set, yscrollcommand=self.scroll_y.set)
+
+        self.scroll_x.pack(side="bottom", fill="x")
+        self.scroll_y.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.canvas.bind("<B1-Motion>", self.paint)
+        self.canvas.bind("<ButtonRelease-1>", self.reset_last_point)
+
+    def update_brush_size(self, val):
+        self.brush_size = int(val)
+
+    def update_canvas(self):
+        self.tk_img = ImageTk.PhotoImage(self.original_image)
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor="nw")
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
+    def paint(self, event):
+        x = self.canvas.canvasx(event.x)
+        y = self.canvas.canvasy(event.y)
+
+        if self.last_x and self.last_y:
+            self.canvas.create_line(self.last_x, self.last_y, x, y, width=self.brush_size, fill="red", capstyle=tk.ROUND, smooth=True)
+            self.mask_draw.line([self.last_x, self.last_y, x, y], fill=255, width=self.brush_size)
+        
+        self.last_x = x
+        self.last_y = y
+
+    def reset_last_point(self, event):
+        self.last_x, self.last_y = None, None
+
+    def process(self):
+        self.btn_process.configure(state="disabled", text="Przetwarzanie...")
+        self.lbl_status.configure(text="Próba połączenia z AI (Chmura)...")
+        self.update_idletasks()
+        
+        temp_mask_path = None
+        
+        try:
+            temp_mask_path = os.path.join(os.path.dirname(self.image_path), "temp_mask.png")
+            self.mask_image.save(temp_mask_path)
+
+            client = Client("multimodalart/stable-diffusion-inpainting") # Popularny, oficjalny model SD Inpainting
+            
+            result_path = client.predict(
+                self.image_path, 
+                temp_mask_path, 
+                # Tutaj moglibyśmy dodać prompt, ale domyślny powinien zadziałać
+                "background", # Wymagany, jeśli model to SD
+                api_name="/predict"
+            )
+
+            if result_path and os.path.exists(result_path):
+                result_pil = Image.open(result_path)
+                self.callback(result_pil, self.image_path)
+                self.cleanup(temp_mask_path)
+                self.destroy()
+                return # Zakończ po sukcesie chmury
+
+        except Exception as e:
+            print(f"Cloud AI failed: {e}")
+            self.lbl_status.configure(text="Błąd chmury. Przełączanie na tryb offline (OpenCV)...")
+            self.update_idletasks()
+            # Kontynuuj do sekcji offline
+
+        # Fallback: OpenCV (Offline)
+        try:
+            open_cv_image = np.array(self.original_image) 
+            open_cv_image = open_cv_image[:, :, ::-1].copy()
+            mask = np.array(self.mask_image)
+
+            inpainted = cv2.inpaint(open_cv_image, mask, 3, cv2.INPAINT_TELEA)
+
+            inpainted_rgb = cv2.cvtColor(inpainted, cv2.COLOR_BGR2RGB)
+            result_pil = Image.fromarray(inpainted_rgb)
+
+            self.callback(result_pil, self.image_path)
+            self.cleanup(temp_mask_path)
+            
+            messagebox.showinfo("Inpainting (Offline)", "Inpainting zakończony w trybie offline (OpenCV) z powodu błędu AI w chmurze lub jego braku. Wyniki mogą być mniej precyzyjne.")
+            self.destroy()
+
+        except Exception as e:
+            self.lbl_status.configure(text="Błąd krytyczny!")
+            self.btn_process.configure(state="normal", text="WYKONAJ (AUTO)")
+            error_msg = f"Nie udało się przetworzyć obrazu (nawet offline).\n\nSzczegóły:\n{str(e)}"
+            ErrorDialog(self, "Błąd Inpaintingu", error_msg)
+            self.cleanup(temp_mask_path)
+
+    def cleanup(self, path):
+        try: 
+            if path and os.path.exists(path): os.remove(path)
+        except: pass
+
+
 class AsystentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.5") # Zmieniono na v1.0.5
+        self.title("Asystent PIM Media Expert v1.0.5")
         self.geometry("1350x895")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.file_list = []
         
-        # Zmieniono domyślną wartość na False
         self.overwrite_var = ctk.BooleanVar(value=False) 
         
         self.current_preview_path = None
         self.preview_image_ref = None 
         
-        # Słownik do przechowywania zmiennych widoczności menu
-        self.view_vars = {}
-        # Słownik do przechowywania referencji do widgetów w sidebarze
+        self.view_vars = {} 
         self.sidebar_widgets = {}
         
         self.bind("<Button-1>", self.hide_context_menu)
@@ -70,42 +255,33 @@ class AsystentApp(ctk.CTk):
             return output.getvalue()
 
     def check_ai_tools(self):
-        # Określanie nazwy pliku binarnego w zależności od systemu
         system_platform = platform.system()
         if system_platform == "Windows":
             bin_name = "realesrgan-ncnn-vulkan.exe"
-        elif system_platform == "Darwin": # macOS
+        elif system_platform == "Darwin":
             bin_name = "realesrgan-ncnn-vulkan-mac"
-        else: # Linux
+        else:
             bin_name = "realesrgan-ncnn-vulkan"
 
-        # 1. Sprawdź czy binary istnieje w systemie (PATH)
         self.ai_tool_path = shutil.which(bin_name)
         if self.ai_tool_path: return True
         
-        # 2. Sprawdź obok pliku skryptu (dla repozytorium/struktury folderów)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         script_bin = os.path.join(script_dir, bin_name)
         if os.path.exists(script_bin) and os.access(script_bin, os.X_OK):
             self.ai_tool_path = script_bin
             return True
 
-        # 3. Sprawdź w bieżącym katalogu roboczym
         local_bin = os.path.abspath(bin_name)
         if os.path.exists(local_bin) and os.access(local_bin, os.X_OK):
             self.ai_tool_path = local_bin
             return True
 
-        # 4. Sprawdź w katalogu tymczasowym PyInstallera (dla OneFile)
         if hasattr(sys, '_MEIPASS'):
             temp_bin = os.path.join(sys._MEIPASS, bin_name)
-            # Na macOS wewnątrz .app binarka może nie mieć atrybutu executable po rozpakowaniu
             if os.path.exists(temp_bin): 
-                # Próba nadania uprawnień wykonywania (ważne dla Linux/macOS po rozpakowaniu z OneFile)
-                try:
-                    os.chmod(temp_bin, 0o755)
-                except:
-                    pass
+                try: os.chmod(temp_bin, 0o755)
+                except: pass
                 self.ai_tool_path = temp_bin
                 return True
                 
@@ -114,7 +290,7 @@ class AsystentApp(ctk.CTk):
     def setup_ui(self):
         self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=ME_BLACK)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(50, weight=1) # Spacer na dole
+        self.sidebar.grid_rowconfigure(50, weight=1)
 
         current_row = 0
 
@@ -234,6 +410,13 @@ class AsystentApp(ctk.CTk):
         self.btn_compress.grid(row=current_row, column=0, padx=15, pady=5)
         self.sidebar_widgets['btn_compress'] = {'widget': self.btn_compress, 'row': current_row}
         current_row += 1
+        
+        # INPAINTING
+        self.btn_inpainting = ctk.CTkButton(self.sidebar, text="INPAINTING (AUTO)", command=self.open_inpainting, **btn_me)
+        self.btn_inpainting.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_inpainting'] = {'widget': self.btn_inpainting, 'row': current_row}
+        self.btn_inpainting.grid_remove() # Domyślnie ukryj
+        current_row += 1
 
         has_ai = self.check_ai_tools()
         if has_ai:
@@ -328,10 +511,12 @@ class AsystentApp(ctk.CTk):
         self.context_menu.add_command(label="Otwórz plik", command=self.open_file_default)
         self.context_menu.add_command(label="Otwórz folder pliku", command=self.open_folder_context)
         self.context_menu.add_command(label="Edytuj w GIMP", command=self.open_in_gimp)
-        self.context_menu.add_command(label="Edytuj obraz (domyślnie)", command=self.edit_default_image) # NOWA OPCJA
+        self.context_menu.add_command(label="Edytuj obraz (domyślnie)", command=self.edit_default_image)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Inpainting (Usuń obiekt)", command=self.open_inpainting)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zapisz zaznaczone do ZIP", command=self.save_to_zip)
-        self.context_menu.add_command(label="Zapisz zaznaczone do 7z", command=self.save_to_7z) # NOWA OPCJA
+        self.context_menu.add_command(label="Zapisz zaznaczone do 7z", command=self.save_to_7z)
         self.context_menu.add_command(label="Usuń z listy", command=self.remove_selected)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zakończ", command=self.quit)
@@ -376,23 +561,18 @@ class AsystentApp(ctk.CTk):
             widget_data = self.sidebar_widgets.get(widget_key)
             if widget_data:
                 widget = widget_data['widget']
-                # command wywołuje toggle_widget z konkretnymi argumentami
                 view_menu.add_checkbutton(label=label, variable=var, 
                                           command=lambda w=widget, v=var, k=widget_key: self.toggle_widget(w, v, k))
-                # Initial state based on default value
                 if not default:
                     widget.grid_remove()
             else:
-                # Obsługa widgetów, które mogą nie istnieć (np. AI)
                 view_menu.add_checkbutton(label=label, variable=var, state='disabled',
                                           command=lambda: print(f"Widget {widget_key} not found"))
             return var
 
-        # Nagłówek Aplikacji
         add_toggle("Nagłówek aplikacji", 'lbl_app_title')
         add_toggle("Media Expert Logo", 'lbl_me_expert', default=False)
 
-        # BLOK 1: GŁÓWNE
         view_menu.add_command(label="--- Główne ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b1')
         add_toggle("Dodaj obrazy", 'btn_add')
@@ -400,21 +580,18 @@ class AsystentApp(ctk.CTk):
         add_toggle("Usuń zaznaczenie", 'btn_remove')
         add_toggle("Kolejność (przyciski)", 'frame_order') 
         
-        # BLOK 2: USTAWIENIA
         view_menu.add_separator()
         view_menu.add_command(label="--- Ustawienia ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b2')
         add_toggle("Jakość JPG (slider)", 'frame_quality')
         add_toggle("Nadpisz pliki (checkbox)", 'chk_overwrite')
         
-        # BLOK 3: KONWERSJA
         view_menu.add_separator()
         view_menu.add_command(label="--- Konwersja ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b3')
         add_toggle("Konwertuj do JPG", 'btn_jpg')
         add_toggle("Konwertuj do WebP", 'btn_webp', default=False)
         
-        # BLOK 4: EDYCJA I SKALOWANIE
         view_menu.add_separator()
         view_menu.add_command(label="--- Edycja i Skalowanie ---", state='disabled')
         add_toggle("Etykieta sekcji", 'lbl_b4')
@@ -424,6 +601,7 @@ class AsystentApp(ctk.CTk):
         add_toggle("Zwiększ do 500px", 'btn_upscale')
         add_toggle("Dopasuj 3000x3600", 'btn_downscale')
         add_toggle("Kompresuj do 3 MB", 'btn_compress')
+        add_toggle("Inpainting", 'btn_inpainting', default=False)
         
         if hasattr(self, 'btn_ai'): # Sprawdź czy AI jest dostępne, zanim dodasz do menu
             view_menu.add_separator()
@@ -438,9 +616,9 @@ class AsystentApp(ctk.CTk):
 
     def toggle_widget(self, widget, var, widget_key):
         if var.get():
-            widget.grid() # grid() przywraca widget z zapamiętanymi opcjami
+            widget.grid() 
         else:
-            widget.grid_remove() # grid_remove() ukrywa, ale pamięta opcje
+            widget.grid_remove() 
 
     def open_me_website(self):
         webbrowser.open_new("https://www.mediaexpert.pl")
@@ -622,12 +800,60 @@ class AsystentApp(ctk.CTk):
                     try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
                     except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP (Linux/Windows).")
 
-    def edit_default_image(self): # NOWA METODA
+    def edit_default_image(self): 
         sel = self.tree.selection()
         if sel:
             path = self.tree.item(sel[0])['tags'][0]
             if not os.path.exists(path): return
-            self.open_path(path) # Używa istniejącej metody do otwierania domyślnego
+            self.open_path(path) 
+
+    def open_inpainting(self):
+        sel = self.tree.selection()
+        if not sel: 
+            messagebox.showwarning("Info", "Wybierz obraz do edycji.")
+            return
+        
+        path = self.tree.item(sel[0])['tags'][0]
+        if not os.path.exists(path): return
+
+        editor = InpaintingEditor(self, path, self.after_inpainting)
+        editor.grab_set() 
+
+    def after_inpainting(self, result_image, original_path):
+        try:
+            original_dir = os.path.dirname(original_path)
+            filename = os.path.basename(original_path)
+            name_root, ext = os.path.splitext(filename)
+            
+            overwrite = self.overwrite_var.get()
+            
+            if overwrite:
+                orig_archive_dir = os.path.join(original_dir, "_orig")
+                os.makedirs(orig_archive_dir, exist_ok=True)
+                archived_path = os.path.join(orig_archive_dir, filename)
+                
+                if not os.path.exists(archived_path):
+                    shutil.copy2(original_path, archived_path) 
+                
+                save_path = original_path
+            else:
+                save_path = os.path.join(original_dir, f"{name_root}_inpainting{ext}")
+
+            result_image.save(save_path, quality=100, optimize=True)
+            
+            self.status_label.configure(text=f"Inpainting zakończony: {os.path.basename(save_path)}")
+            
+            if not overwrite:
+                self.file_list.append(save_path)
+                self.insert_tree_item(save_path)
+            else:
+                if self.current_preview_path == save_path:
+                    self.show_preview(save_path)
+            
+            self.update_indexes()
+
+        except Exception as e:
+            messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać wyniku: {e}")
 
     def save_to_zip(self):
         selected = self.tree.selection()
@@ -649,11 +875,10 @@ class AsystentApp(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Błąd", f"Nie udało się utworzyć ZIP: {e}")
 
-    def save_to_7z(self): # NOWA METODA
+    def save_to_7z(self): 
         selected = self.tree.selection()
         if not selected: return messagebox.showwarning("Info", "Wybierz pliki do spakowania.")
         
-        # Sprawdź dostępność 7z w systemie
         sevenz_path = shutil.which('7z')
         if not sevenz_path:
             messagebox.showerror("Błąd", "Nie znaleziono programu '7z' w systemie.\nUpewnij się, że '7z' (p7zip) jest zainstalowany i dostępny w PATH.")
@@ -665,10 +890,7 @@ class AsystentApp(ctk.CTk):
         files_to_compress = [self.tree.item(item)['tags'][0] for item in selected if os.path.exists(self.tree.item(item)['tags'][0])]
         
         try:
-            # Komenda: 7z a -t7z archiwum.7z plik1 plik2 ...
             cmd = [sevenz_path, 'a', '-t7z', target_7z] + files_to_compress
-            
-            # Uruchomienie procesu z ukrytą konsolą na Windows
             startupinfo = None
             if platform.system() == "Windows":
                 startupinfo = subprocess.STARTUPINFO()
@@ -787,7 +1009,8 @@ class AsystentApp(ctk.CTk):
             res = "N/A"
             try:
                 with Image.open(path) as img: res = f"{img.width}x{img.height} px"
-            except: pass
+            except:
+                pass
             # Dodano "☑" jako wartość dla kolumny "chk"
             self.tree.insert("", "end", values=("☑", "", name, self.format_bytes(size), res, "📂"), tags=[path])
         except: pass
@@ -1076,11 +1299,13 @@ class AsystentApp(ctk.CTk):
             if w < 500 or h < 500:
                 new_w = max(w, 500)
                 new_h = max(h, 500)
+                
                 if i.mode == 'RGBA':
-                    bg = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255))
+                    bg = Image.new("RGBA", (new_w, new_h), (255, 255, 255, 255)) # Białe tło
+                    # Wklejamy na środek
                     x = (new_w - w) // 2
                     y = (new_h - h) // 2
-                    bg.paste(i, (x, y), i)
+                    bg.paste(i, (x, y), i) # Używamy i jako maski dla przezroczystości
                     return bg
                 else:
                     bg = Image.new("RGB", (new_w, new_h), "white")
