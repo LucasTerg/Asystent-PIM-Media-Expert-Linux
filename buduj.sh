@@ -31,9 +31,16 @@ distrobox-enter -n "$CONTAINER_NAME" -- .venv_rmbg/bin/pyinstaller --noconfirm -
     local_rmbg.py
 
 # 2. Budowanie głównej aplikacji (AsystentMediaExpert)
+# Wykluczamy ciężkie biblioteki AI, bo są w rmbg_tool
 echo "Budowanie Asystenta..."
 distrobox-enter -n "$CONTAINER_NAME" -- pyinstaller --noconfirm --onefile --windowed \
     --name "AsystentMediaExpert" \
+    --exclude-module torch \
+    --exclude-module torchvision \
+    --exclude-module transformers \
+    --exclude-module kornia \
+    --exclude-module timm \
+    --exclude-module nvidia \
     --collect-all customtkinter \
     --hidden-import='PIL._tkinter_finder' \
     --add-binary "realesrgan-ncnn-vulkan:." \

@@ -61,6 +61,12 @@ jobs:
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
           --name "AsystentMediaExpert-Linux" \
+          --exclude-module torch \
+          --exclude-module torchvision \
+          --exclude-module transformers \
+          --exclude-module kornia \
+          --exclude-module timm \
+          --exclude-module nvidia \
           --add-binary "realesrgan-ncnn-vulkan:." \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
@@ -125,6 +131,12 @@ jobs:
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
           --name "AsystentMediaExpert-macOS-arm64" \
+          --exclude-module torch \
+          --exclude-module torchvision \
+          --exclude-module transformers \
+          --exclude-module kornia \
+          --exclude-module timm \
+          --exclude-module nvidia \
           --add-binary "realesrgan-ncnn-vulkan-mac:." \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
@@ -144,7 +156,7 @@ jobs:
           dist/rmbg_tool
 
   build-macos-intel:
-    runs-on: macos-15-intel # Zaktualizowano runnera na nowszą wersję
+    runs-on: macos-15-intel # Poprawiono na dedykowany runner Intel
 
     steps:
     - name: Checkout code
@@ -189,6 +201,12 @@ jobs:
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
           --name "AsystentMediaExpert-macOS-Intel" \
+          --exclude-module torch \
+          --exclude-module torchvision \
+          --exclude-module transformers \
+          --exclude-module kornia \
+          --exclude-module timm \
+          --exclude-module nvidia \
           --add-binary "realesrgan-ncnn-vulkan-mac:." \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
