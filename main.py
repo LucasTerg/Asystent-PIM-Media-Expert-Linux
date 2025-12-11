@@ -21,6 +21,8 @@ from gradio_client import Client
 import urllib.parse
 import requests
 import base64
+import configparser
+import webbrowser
 
 # Wyłącz limit pikseli dla dużych obrazów z AI
 Image.MAX_IMAGE_PIXELS = None
@@ -73,6 +75,174 @@ class ErrorDialog(ctk.CTkToplevel):
         body_encoded = urllib.parse.quote(body)
         mailto_link = f"mailto:{recipient}?subject={subject_encoded}&body={body_encoded}"
         webbrowser.open(mailto_link)
+
+    def auto_crop(self):
+        def f(i):
+            if i.mode != 'RGB': i = i.convert('RGB')
+            bw = i.convert("L").point(lambda x: 0 if x >= 240 else 255, '1')
+            bbox = bw.getbbox()
+            return i.crop(bbox) if bbox else i
+        self.process_images("Kadrowanie", f)
+
+class CheckImageDialog(ctk.CTkToplevel):
+    def __init__(self, parent, image_path):
+        super().__init__(parent)
+        self.title("Sprawdź obraz (Inspekcja)")
+        self.geometry("1000x800")
+        
+        # Ładowanie i przetwarzanie
+        try:
+            img = Image.open(image_path).convert("RGB")
+            
+            # Ekstremalny kontrast i niska jasność
+            from PIL import ImageEnhance
+            
+            # Kontrast MAX
+            enhancer_contrast = ImageEnhance.Contrast(img)
+            img = enhancer_contrast.enhance(20.0) 
+            
+            # Jasność MIN (ale nie czarno)
+            enhancer_brightness = ImageEnhance.Brightness(img)
+            img = enhancer_brightness.enhance(0.2) 
+            
+            self.image = img
+            
+            # Canvas
+            self.canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+            self.canvas.pack(fill="both", expand=True)
+            
+            self.bind("<Configure>", self.resize_event)
+            self.bind("<Escape>", lambda e: self.destroy())
+            
+        except Exception as e:
+            messagebox.showerror("Błąd", str(e))
+            self.destroy()
+
+    def resize_event(self, event):
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w < 10 or h < 10: return
+        
+        img_w, img_h = self.image.size
+        ratio = min(w/img_w, h/img_h)
+        new_w, new_h = int(img_w * ratio), int(img_h * ratio)
+        
+        self.tk_img = ImageTk.PhotoImage(self.image.resize((new_w, new_h), Image.NEAREST))
+        self.canvas.delete("all")
+        self.canvas.create_image(w//2, h//2, image=self.tk_img, anchor="center")
+
+class CropEditor(ctk.CTkToplevel):
+    def __init__(self, parent, image_path, callback):
+        super().__init__(parent)
+        self.title("Kadrowanie (Zaznaczenie)")
+        self.geometry("1000x800")
+        self.image_path = image_path
+        self.callback = callback
+        
+        self.original_image = Image.open(image_path).convert("RGB")
+        
+        self.scale_factor = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+        
+        self.start_x = None
+        self.start_y = None
+        self.rect_id = None
+        
+        # UI
+        self.toolbar = ctk.CTkFrame(self, height=50)
+        self.toolbar.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkButton(self.toolbar, text="ZATWIERDŹ", command=self.confirm_crop, fg_color="green", hover_color="darkgreen").pack(side="right", padx=10)
+        ctk.CTkButton(self.toolbar, text="Anuluj", command=self.destroy, fg_color="gray").pack(side="right", padx=10)
+        ctk.CTkLabel(self.toolbar, text="Zaznacz obszar myszką").pack(side="left", padx=10)
+
+        self.canvas = tk.Canvas(self, bg="#2b2b2b", cursor="cross", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        
+        self.canvas.bind("<ButtonPress-1>", self.on_press)
+        self.canvas.bind("<B1-Motion>", self.on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_release)
+        
+        # Użyjemy after, aby narysować obraz po otwarciu okna
+        self.after(100, self.show_image)
+        self.bind("<Configure>", self.resize_event)
+
+    def resize_event(self, event):
+        self.show_image()
+
+    def show_image(self):
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w < 10 or h < 10: return
+        
+        img_w, img_h = self.original_image.size
+        
+        # Oblicz skalę, aby obraz się zmieścił
+        scale_w = w / img_w
+        scale_h = h / img_h
+        self.scale_factor = min(scale_w, scale_h)
+        
+        new_w = int(img_w * self.scale_factor)
+        new_h = int(img_h * self.scale_factor)
+        
+        self.tk_img = ImageTk.PhotoImage(self.original_image.resize((new_w, new_h), Image.LANCZOS))
+        self.canvas.delete("all")
+        
+        # Wyśrodkuj
+        self.offset_x = (w - new_w) // 2
+        self.offset_y = (h - new_h) // 2
+        
+        self.canvas.create_image(self.offset_x, self.offset_y, image=self.tk_img, anchor="nw")
+        
+        # Narysuj prostokąt jeśli już istnieje (przy zmianie rozmiaru)
+        if self.start_x and self.rect_id:
+             # Tutaj trzebaby przeliczyć współrzędne, ale dla uproszczenia zresetujmy
+             self.canvas.delete(self.rect_id)
+             self.start_x = None
+
+    def on_press(self, event):
+        self.start_x = event.x
+        self.start_y = event.y
+        if self.rect_id: self.canvas.delete(self.rect_id)
+        self.rect_id = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=2)
+
+    def on_drag(self, event):
+        if not self.start_x: return
+        cur_x, cur_y = event.x, event.y
+        self.canvas.coords(self.rect_id, self.start_x, self.start_y, cur_x, cur_y)
+
+    def on_release(self, event):
+        self.end_x = event.x
+        self.end_y = event.y
+
+    def confirm_crop(self):
+        if not self.start_x or not self.end_x: 
+            messagebox.showinfo("Info", "Najpierw zaznacz obszar.")
+            return
+        
+        # Konwersja współrzędnych canvas -> obraz
+        x1_c = min(self.start_x, self.end_x)
+        y1_c = min(self.start_y, self.end_y)
+        x2_c = max(self.start_x, self.end_x)
+        y2_c = max(self.start_y, self.end_y)
+        
+        x1 = (x1_c - self.offset_x) / self.scale_factor
+        y1 = (y1_c - self.offset_y) / self.scale_factor
+        x2 = (x2_c - self.offset_x) / self.scale_factor
+        y2 = (y2_c - self.offset_y) / self.scale_factor
+        
+        # Clamp
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(self.original_image.width, x2)
+        y2 = min(self.original_image.height, y2)
+        
+        if x2 - x1 < 1 or y2 - y1 < 1: return
+        
+        cropped = self.original_image.crop((int(x1), int(y1), int(x2), int(y2)))
+        self.callback(cropped, self.image_path)
+        self.destroy()
 
 class InpaintingEditor(ctk.CTkToplevel):
     def __init__(self, parent, image_path, callback):
@@ -239,12 +409,13 @@ class InpaintingEditor(ctk.CTkToplevel):
 
 
 class RmbgEditor(ctk.CTkToplevel):
-    def __init__(self, parent, image_path, callback):
+    def __init__(self, parent, image_path, callback, config_manager):
         super().__init__(parent)
         self.title("Usuwanie Tła (RMBG-2.0 Lokalnie)")
-        self.geometry("1000x600")
+        self.geometry("1000x650")
         self.image_path = image_path
         self.callback = callback
+        self.config_manager = config_manager
         
         # Load Image
         self.original_image = Image.open(image_path).convert("RGB")
@@ -256,23 +427,30 @@ class RmbgEditor(ctk.CTkToplevel):
 
         # Toolbar
         self.toolbar = ctk.CTkFrame(self, height=50)
-        self.toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        self.toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
         
-        self.lbl_status = ctk.CTkLabel(self.toolbar, text="Gotowy do usunięcia tła.", text_color="gray")
+        self.lbl_status = ctk.CTkLabel(self.toolbar, text="Model: briaai/RMBG-2.0 (Non-Commercial)", text_color="gray")
         self.lbl_status.pack(side="left", padx=10)
 
-        self.btn_process = ctk.CTkButton(self.toolbar, text="USUŃ TŁO (Cloud API)", command=self.process, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
+        # License Info Button / Link
+        self.btn_license = ctk.CTkButton(self.toolbar, text="Info o licencji", command=self.show_license_info, width=100, fg_color="transparent", border_width=1, text_color="gray")
+        self.btn_license.pack(side="left", padx=5)
+
+        self.btn_process = ctk.CTkButton(self.toolbar, text="USUŃ TŁO", command=self.process, fg_color=ME_YELLOW, text_color="black", hover_color=ME_YELLOW_HOVER)
         self.btn_process.pack(side="right", padx=10)
 
         # Preview Area
         self.frame_preview = ctk.CTkFrame(self)
-        self.frame_preview.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        self.frame_preview.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
         
         # Image Display (Before/After)
         self.canvas = tk.Canvas(self.frame_preview, bg="#2b2b2b", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
 
-        self.display_image(self.original_image)
+        self.after(100, lambda: self.display_image(self.original_image))
+
+    def show_license_info(self):
+        webbrowser.open("https://huggingface.co/briaai/RMBG-2.0")
 
     def display_image(self, img, comparison_img=None):
         self.canvas.delete("all")
@@ -284,9 +462,9 @@ class RmbgEditor(ctk.CTkToplevel):
         img_ratio = img.width / img.height
         canvas_ratio = w / h
         
-        target_w, target_h = w, h
         if not comparison_img:
             # Single image centered
+            target_w, target_h = w, h
             if img_ratio > canvas_ratio:
                 target_w = w
                 target_h = int(w / img_ratio)
@@ -334,55 +512,43 @@ class RmbgEditor(ctk.CTkToplevel):
     def _run_local_rmbg(self):
         try:
             print("Uruchamianie RMBG-2.0...")
-            
             import sys
             import subprocess
 
-            # Definicja pliku wyjściowego na samym początku
             temp_output = os.path.join(os.path.dirname(self.image_path), "temp_rmbg_result.png")
             
-            # Logika wykrywania środowiska (Skompilowany vs Deweloperski)
+            # Logika wykrywania środowiska
             if getattr(sys, 'frozen', False):
-                # JESTEŚMY SKOMPILOWANI (PyInstaller)
-                # Szukamy pliku wykonywalnego 'rmbg_tool' OBOK pliku Asystenta (nie w środku/tmp)
                 base_path = os.path.dirname(sys.executable)
-                
                 if platform.system() == "Windows":
                     rmbg_exe = os.path.join(base_path, "rmbg_tool", "rmbg_tool.exe")
                 else:
                     rmbg_exe = os.path.join(base_path, "rmbg_tool", "rmbg_tool")
                 
-                # Upewniamy się, że ma prawa wykonywania (Linux/macOS)
                 if os.path.exists(rmbg_exe) and platform.system() != "Windows":
                     try: os.chmod(rmbg_exe, 0o755)
                     except: pass
 
-                print(f"Ścieżka narzędzia (Frozen): {rmbg_exe}")
-                
                 if not os.path.exists(rmbg_exe):
-                     raise Exception(f"Nie znaleziono pliku rmbg_tool w: {base_path}\nUpewnij się, że plik rmbg_tool znajduje się w tym samym folderze co aplikacja.")
+                     raise Exception(f"Nie znaleziono pliku rmbg_tool w: {base_path}")
 
                 cmd = [rmbg_exe, self.image_path, temp_output]
-                
             else:
-                # TRYB DEWELOPERSKI (Python)
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 venv_python = os.path.join(script_dir, ".venv_rmbg", "bin", "python")
                 script_path = os.path.join(script_dir, "local_rmbg.py")
                 
-                if not os.path.exists(venv_python):
-                    venv_python = sys.executable
-
-                print(f"Ścieżka skryptu (Dev): {script_path}")
+                if not os.path.exists(venv_python): venv_python = sys.executable
                 cmd = [venv_python, script_path, self.image_path, temp_output]
             
             # Uruchomienie procesu
             process = subprocess.run(cmd, capture_output=True, text=True)
             
-            if process.returncode == 0 and os.path.exists(temp_output):
-                print(f"Sukces lokalny: {temp_output}")
+            if os.path.exists(temp_output):
                 result_pil = Image.open(temp_output)
                 self.after(0, lambda: self.finish_success(result_pil))
+            elif process.returncode == 0:
+                 raise Exception("Skrypt zakończył się sukcesem, ale nie utworzył pliku.")
             else:
                 error_log = process.stderr if process.stderr else process.stdout
                 raise Exception(f"Błąd skryptu: {error_log}")
@@ -395,18 +561,40 @@ class RmbgEditor(ctk.CTkToplevel):
     def finish_success(self, result_pil):
         self.lbl_status.configure(text="Sukces!")
         self.display_image(self.original_image, result_pil)
-        
-        # Add Save/Apply button logic if needed, currently automatic close on 'Accept'?
-        # Let's change button to 'Zatwierdź'
         self.btn_process.configure(text="ZATWIERDŹ I ZAPISZ", command=lambda: self.save_and_close(result_pil), state="normal", fg_color="green", hover_color="darkgreen")
 
     def finish_error(self, error_msg):
-        self.lbl_status.configure(text=f"Błąd: {error_msg}")
+        self.lbl_status.configure(text="Wystąpił błąd.")
         self.btn_process.configure(state="normal", text="SPRÓBUJ PONOWNIE")
-        messagebox.showerror("Błąd API", f"Nie udało się usunąć tła.\n{error_msg}")
+        messagebox.showerror("Błąd RMBG", f"Nie udało się usunąć tła.\n{error_msg}")
 
     def save_and_close(self, result_pil):
         self.callback(result_pil, self.image_path)
+        self.destroy()
+        
+        self.callback = callback
+
+        ctk.CTkLabel(self, text="Użycie RMBG-2.0", font=("Arial", 18, "bold")).pack(pady=10)
+        ctk.CTkLabel(self, text="Model briaai/RMBG-2.0 jest udostępniony na licencji Non-Commercial.", wraplength=450).pack(pady=5)
+        ctk.CTkLabel(self, text="Oznacza to, że możesz go używać wyłącznie do celów niekomercyjnych.", wraplength=450).pack(pady=5)
+        ctk.CTkLabel(self, text="Jeśli zamierzasz używać go komercyjnie, skontaktuj się z Bria AI.", wraplength=450, text_color="red").pack(pady=5)
+        
+        ctk.CTkLabel(self, text="Więcej informacji o licencji:").pack(pady=5)
+        self.license_link = ctk.CTkLabel(self, text="https://huggingface.co/briaai/RMBG-2.0", text_color="blue", cursor="hand2")
+        self.license_link.pack()
+        self.license_link.bind("<Button-1>", lambda e: webbrowser.open_new("https://huggingface.co/briaai/RMBG-2.0"))
+
+        ctk.CTkButton(self, text="Akceptuję warunki i rozumiem ograniczenia", command=self.accept, fg_color="green", hover_color="darkgreen").pack(pady=15)
+        ctk.CTkButton(self, text="Nie akceptuję / Anuluj", command=self.reject, fg_color="gray", hover_color="darkgray").pack(pady=5)
+
+        self.grab_set()
+
+    def accept(self):
+        self.callback(True)
+        self.destroy()
+
+    def reject(self):
+        self.callback(False)
         self.destroy()
 
 class DeleteDialog(ctk.CTkToplevel):
@@ -445,16 +633,47 @@ class DeleteDialog(ctk.CTkToplevel):
         self.callback("perm", self.paths)
         self.destroy()
 
-class AsystentApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
 
-        self.title("Asystent PIM Media Expert v1.0.7") 
-        self.geometry("1350x895")
+
+class ConfigManager:
+    def __init__(self, filename="config.ini"):
+        self.config = configparser.ConfigParser()
+        self.filename = filename
+        if os.path.exists(self.filename):
+            self.config.read(self.filename)
+        else:
+            # Ustaw wartości domyślne, jeśli plik nie istnieje
+            self.config['RMBG'] = {'license_accepted': 'no'}
+            self.save()
+
+    def get(self, section, option, default=None):
+        try:
+            return self.config.get(section, option)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return default
+
+    def set(self, section, option, value):
+        if not self.config.has_section(section):
+            self.config.add_section(section)
+        self.config.set(section, option, str(value))
+        self.save()
+
+    def save(self):
+        with open(self.filename, 'w') as configfile:
+            self.config.write(configfile)
+
+class AsystentApp(ctk.CTk):
+        def __init__(self):
+            super().__init__()
+    
+            self.config_manager = ConfigManager() # Inicjalizacja menedżera konfiguracji
+            self.title("asystentPIM v1.0.8") 
+            self.geometry("1350x895")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.file_list = []
+        self.last_dir = self.config_manager.get('SETTINGS', 'last_dir', os.path.expanduser("~"))
         
         self.overwrite_var = ctk.BooleanVar(value=False) 
         
@@ -621,9 +840,25 @@ class AsystentApp(ctk.CTk):
         self.sidebar_widgets['btn_border'] = {'widget': self.btn_border, 'row': current_row}
         current_row += 1
 
-        self.btn_crop = ctk.CTkButton(self.sidebar, text="KADRUJ", command=self.auto_crop, **btn_me)
+        self.btn_border_lr = ctk.CTkButton(self.sidebar, text="PASEK 5px L+P", command=self.add_border_lr_5px, **btn_me)
+        self.btn_border_lr.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_border_lr'] = {'widget': self.btn_border_lr, 'row': current_row}
+        current_row += 1
+
+        self.btn_border_tb = ctk.CTkButton(self.sidebar, text="PASEK 5px G+D", command=self.add_border_tb_5px, **btn_me)
+        self.btn_border_tb.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_border_tb'] = {'widget': self.btn_border_tb, 'row': current_row}
+        current_row += 1
+
+        self.btn_crop = ctk.CTkButton(self.sidebar, text="KADRUJ (AUTO)", command=self.auto_crop, **btn_me)
         self.btn_crop.grid(row=current_row, column=0, padx=15, pady=5)
         self.sidebar_widgets['btn_crop'] = {'widget': self.btn_crop, 'row': current_row}
+        current_row += 1
+
+        self.btn_crop_select = ctk.CTkButton(self.sidebar, text="KADRUJ (ZAZNACZENIE)", command=self.open_crop_editor, **btn_me)
+        self.btn_crop_select.grid(row=current_row, column=0, padx=15, pady=5)
+        self.sidebar_widgets['btn_crop_select'] = {'widget': self.btn_crop_select, 'row': current_row}
+        self.btn_crop_select.grid_remove() # Domyślnie ukryty
         current_row += 1
 
         self.btn_upscale = ctk.CTkButton(self.sidebar, text="ZWIĘKSZ DO 500px", command=self.upscale_500, **btn_me)
@@ -740,6 +975,7 @@ class AsystentApp(ctk.CTk):
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Inpainting (Usuń obiekt)", command=self.open_inpainting)
         self.context_menu.add_command(label="Usuń tło (RMBG-2.0)", command=self.open_rembg)
+        self.context_menu.add_command(label="Sprawdź obraz (Inspekcja)", command=self.check_image)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Zapisz zaznaczone do ZIP", command=self.save_to_zip)
         self.context_menu.add_command(label="Zapisz zaznaczone do 7z", command=self.save_to_7z)
@@ -784,14 +1020,28 @@ class AsystentApp(ctk.CTk):
         menubar.add_cascade(label="Widok", menu=view_menu)
         
         def add_toggle(label, widget_key, default=True):
-            var = tk.BooleanVar(value=default)
+            # Odczytaj stan z configu, jeśli istnieje, w przeciwnym razie użyj default
+            saved_state = self.config_manager.get('VIEW', widget_key)
+            if saved_state is not None:
+                is_visible = saved_state == 'True'
+            else:
+                is_visible = default
+            
+            var = tk.BooleanVar(value=is_visible)
             self.view_vars[label] = var
             widget_data = self.sidebar_widgets.get(widget_key)
+            
             if widget_data:
                 widget = widget_data['widget']
-                view_menu.add_checkbutton(label=label, variable=var, 
-                                          command=lambda w=widget, v=var, k=widget_key: self.toggle_widget(w, v, k))
-                if not default:
+                
+                # Funkcja opakowująca zapis do configu
+                def on_toggle(w=widget, v=var, k=widget_key):
+                    self.toggle_widget(w, v, k)
+                    self.config_manager.set('VIEW', k, str(v.get()))
+
+                view_menu.add_checkbutton(label=label, variable=var, command=on_toggle)
+                
+                if not is_visible:
                     widget.grid_remove()
             else:
                 view_menu.add_checkbutton(label=label, variable=var, state='disabled',
@@ -810,9 +1060,9 @@ class AsystentApp(ctk.CTk):
         
         view_menu.add_separator()
         view_menu.add_command(label="--- Ustawienia ---", state='disabled')
-        add_toggle("Etykieta sekcji", 'lbl_b2')
-        add_toggle("Jakość JPG (slider)", 'frame_quality')
-        add_toggle("Nadpisz pliki (checkbox)", 'chk_overwrite')
+        add_toggle("Etykieta sekcji", 'lbl_b2', default=False) # Domyślnie ukryte
+        add_toggle("Jakość JPG (slider)", 'frame_quality', default=False) # Domyślnie ukryte
+        add_toggle("Nadpisz pliki (checkbox)", 'chk_overwrite', default=False) # Domyślnie ukryte
         
         view_menu.add_separator()
         view_menu.add_command(label="--- Konwersja ---", state='disabled')
@@ -825,10 +1075,13 @@ class AsystentApp(ctk.CTk):
         add_toggle("Etykieta sekcji", 'lbl_b4')
         add_toggle("Dodaj białe tło", 'btn_white_bg')
         add_toggle("Dodaj ramkę", 'btn_border')
-        add_toggle("Kadruj", 'btn_crop')
+        add_toggle("Kadruj (Auto)", 'btn_crop')
+        add_toggle("Kadruj (Zaznaczenie)", 'btn_crop_select', default=False)
         add_toggle("Zwiększ do 500px", 'btn_upscale')
         add_toggle("Dopasuj 3000x3600", 'btn_downscale')
-        add_toggle("Kompresuj do 3 MB", 'btn_compress')
+        add_toggle("Dodaj ramkę 5px", 'btn_border')
+        add_toggle("Pasek 5px L+P", 'btn_border_lr')
+        add_toggle("Pasek 5px G+D", 'btn_border_tb')
         
         if hasattr(self, 'btn_ai'): # Sprawdź czy AI jest dostępne, zanim dodasz do menu
             view_menu.add_separator()
@@ -844,8 +1097,19 @@ class AsystentApp(ctk.CTk):
         # Menu About
         about_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="About", menu=about_menu)
-        about_menu.add_command(label="Asystent PIM", state='disabled')
+        about_menu.add_command(label="O programie", command=self.show_about)
         about_menu.add_command(label="Media Expert", command=self.open_me_website)
+
+    def show_about(self):
+        msg = "asystentPIM v1.0.8\n\n"
+        msg += "Technologie:\n"
+        msg += "• Python & CustomTkinter\n"
+        msg += "• RMBG-2.0 (Bria AI) - Usuwanie tła\n"
+        msg += "• Stable Diffusion - Inpainting (Wymaga A1111)\n"
+        msg += "• Real-ESRGAN - Upscaling\n"
+        msg += "• GIMP Integration\n\n"
+        msg += "Dla: Media Expert"
+        messagebox.showinfo("O programie", msg)
 
     def toggle_widget(self, widget, var, widget_key):
         if var.get():
@@ -1025,11 +1289,27 @@ class AsystentApp(ctk.CTk):
                 try:
                     subprocess.Popen(['open', '-a', 'GIMP', path])
                 except Exception as e:
-                    messagebox.showerror("Błąd", f"Nie udało się uruchomić GIMP na macOS: {e}\nSprawdź, czy GIMP jest zainstalowany i dostępny w folderze /Applications.")
-            else:
+                    messagebox.showerror("Błąd", f"Nie udało się uruchomić GIMP na macOS: {e}\nSprawdź, czy GIMP jest zainstalowany.")
+            elif platform.system() == "Linux":
+                # Sprawdź Flatpak
+                if shutil.which("flatpak"):
+                    try:
+                        # Próba uruchomienia wersji Flatpak
+                        subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
+                        return
+                    except: pass
+                
+                # Standardowy GIMP
                 try:
                     subprocess.Popen(['gimp', path])
                 except FileNotFoundError:
+                    messagebox.showerror("Błąd", "Nie znaleziono programu GIMP (ani standardowego, ani Flatpak).")
+            else:
+                # Windows
+                try:
+                    subprocess.Popen(['gimp', path])
+                except FileNotFoundError:
+                    messagebox.showerror("Błąd", "Nie znaleziono programu GIMP. Upewnij się, że jest w PATH.")
                     try: subprocess.Popen(['flatpak', 'run', 'org.gimp.GIMP', path])
                     except: messagebox.showerror("Błąd", "Nie znaleziono programu GIMP (Linux/Windows).")
 
@@ -1053,6 +1333,14 @@ class AsystentApp(ctk.CTk):
         editor = InpaintingEditor(self, path, self.after_inpainting)
         editor.grab_set() # Zablokuj główne okno
 
+    def check_image(self):
+        sel = self.tree.selection()
+        if not sel: return
+        path = self.tree.item(sel[0])['tags'][0]
+        if not os.path.exists(path): return
+        
+        CheckImageDialog(self, path)
+
     def open_rembg(self):
         sel = self.tree.selection()
         if not sel: 
@@ -1063,7 +1351,7 @@ class AsystentApp(ctk.CTk):
         if not os.path.exists(path): return
 
         # Otwórz edytor usuwania tła
-        editor = RmbgEditor(self, path, self.after_rembg)
+        editor = RmbgEditor(self, path, self.after_rembg, self.config_manager)
         editor.grab_set()
 
     def after_rembg(self, result_image, original_path):
@@ -1277,28 +1565,47 @@ class AsystentApp(ctk.CTk):
 
     def add_images(self):
         types = [("Obrazy", "*.jpg *.jpeg *.png *.bmp *.webp *.heic *.avif *.tif *.tiff *.JPG *.JPEG *.PNG *.BMP *.WEBP *.HEIC *.AVIF *.TIF *.TIFF")]
-        files = filedialog.askopenfilenames(filetypes=types)
-        if files: self.process_added_files(files)
+        files = filedialog.askopenfilenames(
+            title="Wybierz obrazy",
+            initialdir=self.last_dir,
+            filetypes=types
+        )
+        if files:
+            # Zapisz ostatnio wybrany katalog
+            self.last_dir = os.path.dirname(files[0])
+            self.config_manager.set('SETTINGS', 'last_dir', self.last_dir)
+            for file_path in files:
+                self.process_added_files([file_path]) # Przenieś to tutaj, żeby było w pętli
 
     def add_folder(self):
-        folder = filedialog.askdirectory()
-        if not folder: return
-        
-        # Rozszerzenia obsługiwane (małymi literami)
-        exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic', '.avif', '.tif', '.tiff')
-        
-        files = []
-        try:
-            for f in os.listdir(folder):
-                if f.lower().endswith(exts):
-                    full_path = os.path.join(folder, f)
-                    if os.path.isfile(full_path):
-                        files.append(full_path)
-        except Exception as e:
-            print(f"Error reading folder: {e}")
+        folder_path = filedialog.askdirectory(
+            title="Wybierz folder",
+            initialdir=self.last_dir # Użyj ostatnio zapamiętanego katalogu
+        )
+        if folder_path:
+            # Zapisz ostatnio wybrany katalog
+            self.last_dir = folder_path
+            self.config_manager.set('SETTINGS', 'last_dir', self.last_dir)
             
-        if files:
-            self.process_added_files(files)
+            # Przetwarzanie plików z folderu
+            all_files_in_folder = []
+            for root, _, files in os.walk(folder_path):
+                for file in files:
+                    all_files_in_folder.append(os.path.join(root, file))
+            self.process_added_files(all_files_in_folder) # Przetwórz wszystkie pliki naraz
+
+    def remove_selected(self):
+        selected_paths = []
+        for item in self.tree.selection():
+            path = self.tree.item(item)['tags'][0]
+            selected_paths.append(path)
+            self.tree.delete(item)
+        
+        # Usuń z self.file_list
+        self.file_list = [p for p in self.file_list if p not in selected_paths]
+
+        self.update_indexes()
+        self.lbl_preview.configure(image="", text="Wybierz plik")
 
     def process_added_files(self, files):
         for path in files:
@@ -1598,14 +1905,30 @@ class AsystentApp(ctk.CTk):
         self.process_images("BialeTlo", f)
     def add_border_5px(self):
         def f(i):
-            if i.mode != 'RGBA': i = i.convert('RGBA')
             w, h = i.size
-            nw, nh = w+10, h+10
-            bg = Image.new("RGB", (nw, nh), "white")
-            mask = i.split()[3] if 'A' in i.getbands() else None
-            bg.paste(i, (5, 5), mask)
+            bg = Image.new("RGB", (w + 10, h + 10), "white") # Biała ramka 5px
+            bg.paste(i, (5, 5))
             return bg
-        self.process_images("Ramka5px", f)
+        self.process_images("Ramka 5px", f)
+
+    def add_border_lr_5px(self):
+        def f(i):
+            w, h = i.size
+            new_w = w + 10  # 5px z lewej, 5px z prawej
+            bg = Image.new("RGB", (new_w, h), "white")
+            bg.paste(i, (5, 0)) # Wklej obraz na środku (x=5, y=0)
+            return bg
+        self.process_images("Pasek L+P 5px", f)
+
+    def add_border_tb_5px(self):
+        def f(i):
+            w, h = i.size
+            new_h = h + 10  # 5px z góry, 5px z dołu
+            bg = Image.new("RGB", (w, new_h), "white")
+            bg.paste(i, (0, 5)) # Wklej obraz na środku (x=0, y=5)
+            return bg
+        self.process_images("Pasek G+D 5px", f)
+
     def auto_crop(self):
         def f(i):
             if i.mode != 'RGB': i = i.convert('RGB')
@@ -1642,6 +1965,78 @@ class AsystentApp(ctk.CTk):
                 return i
             return i
         self.process_images("Downscale", f)
+
+    def open_crop_editor(self):
+        sel = self.tree.selection()
+        if not sel: 
+            messagebox.showwarning("Info", "Wybierz obraz do kadrowania.")
+            return
+        
+        path = self.tree.item(sel[0])['tags'][0]
+        if not os.path.exists(path): return
+
+        # Otwórz edytor
+        editor = CropEditor(self, path, self.after_crop)
+        editor.wait_visibility() # Poczekaj aż okno się pojawi
+        editor.grab_set()
+
+    def after_crop(self, result_image, original_path):
+        try:
+            original_dir = os.path.dirname(original_path)
+            filename = os.path.basename(original_path)
+            name_root, ext = os.path.splitext(filename)
+            
+            # Jeśli nadpisywanie włączone
+            overwrite = self.overwrite_var.get()
+            
+            if overwrite:
+                save_path = original_path
+            else:
+                save_path = os.path.join(original_dir, f"{name_root}_crop{ext}")
+
+            # Zapisz wynik
+            result_image.save(save_path, quality=100, optimize=True)
+            
+            self.status_label.configure(text=f"Wykadrowano: {os.path.basename(save_path)}")
+            
+            if not overwrite:
+                # ARCHIWIZACJA ORYGINAŁU
+                orig_archive_dir = os.path.join(original_dir, "_orig")
+                os.makedirs(orig_archive_dir, exist_ok=True)
+                archived_path = os.path.join(orig_archive_dir, filename)
+                
+                if not os.path.exists(archived_path):
+                    shutil.move(original_path, archived_path)
+                else:
+                    import time
+                    ts = int(time.time())
+                    archived_path = os.path.join(orig_archive_dir, f"{name_root}_{ts}{ext}")
+                    shutil.move(original_path, archived_path)
+
+                # Odśwież listę (usuń oryginał, dodaj wynik)
+                # 1. Usuń oryginał z widoku
+                for item in self.tree.get_children():
+                    if self.tree.item(item)['tags'][0] == original_path:
+                        self.tree.delete(item)
+                        break
+                
+                # 2. Usuń oryginał z listy plików
+                self.file_list = [p for p in self.file_list if p != original_path]
+
+                # 3. Dodaj wynik
+                self.file_list.append(save_path)
+                new_item_id = self.insert_tree_item(save_path)
+                if new_item_id:
+                    self.tree.selection_set(new_item_id)
+                    self.tree.see(new_item_id)
+            else:
+                # Odśwież info o pliku (rozmiar się zmienił)
+                self.update_indexes() 
+
+            # messagebox.showinfo("Sukces", f"Zapisano jako:\n{os.path.basename(save_path)}")
+
+        except Exception as e:
+            messagebox.showerror("Błąd zapisu", str(e))
 
     def delete_from_disk_dialog(self):
         sel = self.tree.selection()

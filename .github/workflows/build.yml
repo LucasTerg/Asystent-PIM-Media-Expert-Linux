@@ -60,7 +60,7 @@ jobs:
       run: |
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
-          --name "AsystentMediaExpert-Linux" \
+          --name "asystentPIM-Linux" \
           --exclude-module torch \
           --exclude-module torchvision \
           --exclude-module transformers \
@@ -80,9 +80,9 @@ jobs:
     - name: Upload Linux Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-Linux-All
+        name: asystentPIM-Linux-All
         path: |
-          dist/AsystentMediaExpert-Linux
+          dist/asystentPIM-Linux
           dist/rmbg_tool
 
   build-macos-arm64:
@@ -130,7 +130,7 @@ jobs:
       run: |
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
-          --name "AsystentMediaExpert-macOS-arm64" \
+          --name "asystentPIM-macOS-arm64" \
           --exclude-module torch \
           --exclude-module torchvision \
           --exclude-module transformers \
@@ -150,9 +150,9 @@ jobs:
     - name: Upload macOS ARM64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-arm64-All
+        name: asystentPIM-macOS-arm64-All
         path: |
-          dist/AsystentMediaExpert-macOS-arm64
+          dist/asystentPIM-macOS-arm64
           dist/rmbg_tool
 
   build-macos-intel:
@@ -200,14 +200,14 @@ jobs:
       run: |
         source venv/bin/activate
         pyinstaller --noconfirm --onefile --windowed \
-          --name "AsystentMediaExpert-macOS-Intel" \
+          --name "asystentPIM-macOS-Intel" \
           --exclude-module torch \
           --exclude-module torchvision \
           --exclude-module transformers \
           --exclude-module kornia \
           --exclude-module timm \
           --exclude-module nvidia \
-          --add-binary "realesrgan-ncnn-vulkan-mac:. " \
+          --add-binary "realesrgan-ncnn-vulkan-mac:." \
           --add-data "models:models" \
           --hidden-import "PIL._tkinter_finder" \
           --hidden-import "tkinterdnd2" \
@@ -220,9 +220,9 @@ jobs:
     - name: Upload macOS Intel Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-Intel-All
+        name: asystentPIM-macOS-Intel-All
         path: |
-          dist/AsystentMediaExpert-macOS-Intel
+          dist/asystentPIM-macOS-Intel
           dist/rmbg_tool
 
   release:
@@ -234,41 +234,41 @@ jobs:
     - name: Download Linux Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-Linux-All
+        name: asystentPIM-Linux-All
         path: dist/linux
 
     - name: Download macOS ARM64 Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-arm64-All
+        name: asystentPIM-macOS-arm64-All
         path: dist/macos-arm64
 
     - name: Download macOS Intel Artifact
       uses: actions/download-artifact@v4
       with:
-        name: AsystentMediaExpert-macOS-Intel-All
+        name: asystentPIM-macOS-Intel-All
         path: dist/macos-intel
 
     - name: Prepare Separate ZIPs
       run: |
         # Linux
         cd dist/linux
-        chmod +x AsystentMediaExpert-Linux
-        zip -r AsystentMediaExpert-Linux.zip AsystentMediaExpert-Linux
+        chmod +x asystentPIM-Linux
+        zip -r asystentPIM-Linux.zip asystentPIM-Linux
         zip -r rmbg_tool-Linux.zip rmbg_tool
         cd ../..
         
         # macOS ARM64
         cd dist/macos-arm64
-        chmod +x AsystentMediaExpert-macOS-arm64
-        zip -r AsystentMediaExpert-macOS-arm64.zip AsystentMediaExpert-macOS-arm64
+        chmod +x asystentPIM-macOS-arm64
+        zip -r asystentPIM-macOS-arm64.zip asystentPIM-macOS-arm64
         zip -r rmbg_tool-macOS-arm64.zip rmbg_tool
         cd ../..
         
         # macOS Intel
         cd dist/macos-intel
-        chmod +x AsystentMediaExpert-macOS-Intel
-        zip -r AsystentMediaExpert-macOS-Intel.zip AsystentMediaExpert-macOS-Intel
+        chmod +x asystentPIM-macOS-Intel
+        zip -r asystentPIM-macOS-Intel.zip asystentPIM-macOS-Intel
         zip -r rmbg_tool-macOS-Intel.zip rmbg_tool
         cd ../..
 
@@ -279,11 +279,11 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/linux/AsystentMediaExpert-Linux.zip
+          dist/linux/asystentPIM-Linux.zip
           dist/linux/rmbg_tool-Linux.zip
-          dist/macos-arm64/AsystentMediaExpert-macOS-arm64.zip
+          dist/macos-arm64/asystentPIM-macOS-arm64.zip
           dist/macos-arm64/rmbg_tool-macOS-arm64.zip
-          dist/macos-intel/AsystentMediaExpert-macOS-Intel.zip
+          dist/macos-intel/asystentPIM-macOS-Intel.zip
           dist/macos-intel/rmbg_tool-macOS-Intel.zip
         generate_release_notes: true
       env:

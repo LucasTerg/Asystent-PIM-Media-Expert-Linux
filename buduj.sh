@@ -34,7 +34,7 @@ distrobox-enter -n "$CONTAINER_NAME" -- .venv_rmbg/bin/pyinstaller --noconfirm -
 # Wykluczamy ciężkie biblioteki AI, bo są w rmbg_tool
 echo "Budowanie Asystenta..."
 distrobox-enter -n "$CONTAINER_NAME" -- pyinstaller --noconfirm --onefile --windowed \
-    --name "AsystentMediaExpert" \
+    --name "asystentPIM" \
     --exclude-module torch \
     --exclude-module torchvision \
     --exclude-module transformers \
@@ -50,5 +50,5 @@ distrobox-enter -n "$CONTAINER_NAME" -- pyinstaller --noconfirm --onefile --wind
 
 echo "Zakończono. Pliki wynikowe znajdują się w folderze dist/"
 echo "Struktura:"
-echo "  dist/AsystentMediaExpert (plik)"
+echo "  dist/asystentPIM (plik)"
 echo "  dist/rmbg_tool/ (folder z narzędziem AI)"

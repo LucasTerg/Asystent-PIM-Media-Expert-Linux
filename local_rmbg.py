@@ -5,7 +5,18 @@ import torch
 from torchvision import transforms
 from transformers import AutoModelForImageSegmentation
 
+# ======================================================================================
+# UWAGA: Model briaai/RMBG-2.0 jest udostępniony na licencji Non-Commercial.
+# Użycie go do celów komercyjnych wymaga kontaktu z Bria AI.
+# Więcej informacji: https://huggingface.co/briaai/RMBG-2.0
+# ======================================================================================
+
 def remove_background(input_path, output_path):
+    print("----------------------------------------------------------------------")
+    print("Używany model RMBG-2.0 jest na licencji Non-Commercial. Używaj rozważnie.")
+    print("Link do licencji: https://huggingface.co/briaai/RMBG-2.0")
+    print("----------------------------------------------------------------------")
+
     print(f"Inicjalizacja RMBG-2.0 dla: {input_path}")
     
     # Wykrywanie urządzenia (CUDA lub CPU)
