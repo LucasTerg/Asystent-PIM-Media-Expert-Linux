@@ -663,12 +663,12 @@ class ConfigManager:
             self.config.write(configfile)
 
 class AsystentApp(ctk.CTk):
-        def __init__(self):
-            super().__init__()
-    
-            self.config_manager = ConfigManager() # Inicjalizacja menedżera konfiguracji
-            self.title("asystentPIM v1.0.8") 
-            self.geometry("1350x895")
+    def __init__(self):
+        super().__init__()
+
+        self.config_manager = ConfigManager() # Inicjalizacja menedżera konfiguracji
+        self.title("asystentPIM v1.0.8") 
+        self.geometry("1350x895")
         self.set_icon()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -1094,6 +1094,12 @@ class AsystentApp(ctk.CTk):
         experimental_menu.add_command(label="Inpainting (AI)", command=self.open_inpainting)
         experimental_menu.add_command(label="Usuń tło (RMBG-2.0 Lokalnie)", command=self.open_rembg)
 
+        # Menu Export
+        export_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Export", menu=export_menu)
+        export_menu.add_command(label="Eksportuj do PDF (Zaznaczone)", command=self.export_to_pdf)
+        export_menu.add_command(label="Eksportuj do JPG (Zaznaczone)", command=self.export_to_jpg)
+
         # Menu About
         about_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="About", menu=about_menu)
@@ -1231,7 +1237,78 @@ class AsystentApp(ctk.CTk):
             current_num += 1
 
         self.update_indexes()
-        self.status_label.configure(text=f"Zmieniono nazwy dla {renamed_count} plików.")
+
+    def export_to_pdf(self):
+        # Pobierz zaznaczone (zafajkowane) pliki
+        items_to_process = []
+        for item in self.tree.get_children():
+            vals = self.tree.item(item)['values']
+            if vals[0] == "☑":
+                path = self.tree.item(item)['tags'][0]
+                if os.path.exists(path):
+                    items_to_process.append(path)
+        
+        if not items_to_process:
+            messagebox.showinfo("Info", "Zaznacz pliki (checkboxem ☑) do eksportu.")
+            return
+
+        # Wybierz miejsce zapisu
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            title="Zapisz jako PDF",
+            initialdir=self.last_dir,
+            initialfile=f"Export_{len(items_to_process)}_files.pdf"
+        )
+        
+        if not save_path: return
+
+        try:
+            images = []
+            # Pierwszy obraz
+            first_image = Image.open(items_to_process[0]).convert("RGB")
+            
+            # Reszta obrazów
+            for path in items_to_process[1:]:
+                img = Image.open(path).convert("RGB")
+                images.append(img)
+            
+            # Zapisz
+            first_image.save(save_path, save_all=True, append_images=images)
+            messagebox.showinfo("Sukces", f"Pomyślnie utworzono plik PDF:\n{os.path.basename(save_path)}")
+            
+        except Exception as e:
+            messagebox.showerror("Błąd PDF", f"Nie udało się utworzyć PDF.\n{e}")
+
+    def export_to_jpg(self):
+        items_to_process = []
+        for item in self.tree.get_children():
+            vals = self.tree.item(item)['values']
+            if vals[0] == "☑":
+                path = self.tree.item(item)['tags'][0]
+                if os.path.exists(path):
+                    items_to_process.append(path)
+        
+        if not items_to_process:
+            messagebox.showinfo("Info", "Zaznacz pliki do eksportu.")
+            return
+
+        export_dir = filedialog.askdirectory(title="Wybierz folder docelowy")
+        if not export_dir: return
+
+        count = 0
+        for path in items_to_process:
+            try:
+                name = os.path.splitext(os.path.basename(path))[0]
+                save_path = os.path.join(export_dir, f"{name}.jpg")
+                
+                img = Image.open(path).convert("RGB")
+                img.save(save_path, "JPEG", quality=95)
+                count += 1
+            except Exception as e:
+                print(f"Błąd eksportu JPG {path}: {e}")
+        
+        # Opcjonalnie: messagebox.showinfo("Sukces", f"Wyeksportowano {count} plików do JPG.")
 
     def on_tree_click(self, event):
         self.hide_context_menu(event)
